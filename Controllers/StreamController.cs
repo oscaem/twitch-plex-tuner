@@ -26,7 +26,7 @@ public class StreamController : ControllerBase
         var processStartInfo = new ProcessStartInfo
         {
             FileName = "streamlink",
-            Arguments = $"{url} best --stdout --quiet --twitch-disable-ads --twitch-low-latency --twitch-disable-hosting --twitch-disable-reruns --hls-live-edge 1 --stream-segment-threads 2",
+            Arguments = $"{url} 720p60,720p,best --stdout --quiet --twitch-disable-ads --twitch-low-latency --twitch-disable-hosting --twitch-disable-reruns --hls-live-edge 1 --stream-segment-threads 2",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
