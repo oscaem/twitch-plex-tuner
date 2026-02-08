@@ -43,52 +43,99 @@ public class TwitchService
 
     public async Task UpdateChannelsAsync()
     {
-        if (!File.Exists(_config.SubscriptionsPath))
+        try
         {
-            Console.WriteLine($"Subscriptions file not found at {_config.SubscriptionsPath}");
-            return;
+            Console.WriteLine($"=== UPDATE CHANNELS START ===");
+            Console.WriteLine($"ClientId: {(_config.ClientId?.Length > 0 ? "SET" : "MISSING")}");
+            Console.WriteLine($"ClientSecret: {(_config.ClientSecret?.Length > 0 ? "SET" : "MISSING")}");
+            Console.WriteLine($"SubscriptionsPath: {_config.SubscriptionsPath}");
+
+            if (!File.Exists(_config.SubscriptionsPath))
+            {
+                Console.WriteLine($"ERROR: Subscriptions file not found at {_config.SubscriptionsPath}");
+                return;
+            }
+
+            Console.WriteLine("Reading YAML file...");
+            var yaml = await File.ReadAllTextAsync(_config.SubscriptionsPath);
+            Console.WriteLine($"YAML content length: {yaml.Length}");
+
+            var deserializer = new DeserializerBuilder().Build();
+            var subs = deserializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(yaml);
+            Console.WriteLine($"YAML keys: {string.Join(", ", subs.Keys)}");
+
+            // Support both "twitch_recorder" and "subscriptions" keys
+            Dictionary<string, string>? channelDict = null;
+            if (subs.ContainsKey("twitch_recorder"))
+            {
+                channelDict = subs["twitch_recorder"];
+                Console.WriteLine($"Using 'twitch_recorder' key with {channelDict.Count} entries");
+            }
+            else if (subs.ContainsKey("subscriptions"))
+            {
+                channelDict = subs["subscriptions"];
+                Console.WriteLine($"Using 'subscriptions' key with {channelDict.Count} entries");
+            }
+
+            if (channelDict == null || !channelDict.Any())
+            {
+                Console.WriteLine("ERROR: No channels found in subscriptions file");
+                return;
+            }
+
+            // Extract login names from Twitch URLs
+            var logins = channelDict.Values
+                .Select(url => url.Split('/').Last().ToLower())
+                .Where(login => !string.IsNullOrEmpty(login))
+                .ToList();
+
+            Console.WriteLine($"Found {logins.Count} channels: {string.Join(", ", logins)}");
+
+            Console.WriteLine("Getting access token...");
+            await EnsureAccessToken();
+            Console.WriteLine("Access token obtained");
+
+            // Get User IDs
+            Console.WriteLine("Fetching user data from Twitch API...");
+            var usersResponse = await "https://api.twitch.tv/helix/users"
+                .WithHeader("Client-ID", _config.ClientId)
+                .WithOAuthBearerToken(_accessToken)
+                .SetQueryParam("login", logins)
+                .GetJsonAsync<TwitchResponse<TwitchUser>>();
+
+            Console.WriteLine($"Got {usersResponse.Data.Count} users from Twitch");
+
+            var newChannels = usersResponse.Data.Select(u => new ChannelInfo
+            {
+                Login = u.Login,
+                DisplayName = u.DisplayName,
+                UserId = u.Id,
+                ProfileImageUrl = u.ProfileImageUrl
+            }).ToList();
+
+            // Get Stream Status
+            Console.WriteLine("Fetching stream status...");
+            var streamsResponse = await "https://api.twitch.tv/helix/streams"
+                .WithHeader("Client-ID", _config.ClientId)
+                .WithOAuthBearerToken(_accessToken)
+                .SetQueryParam("user_id", newChannels.Select(c => c.UserId))
+                .GetJsonAsync<TwitchResponse<TwitchStream>>();
+
+            Console.WriteLine($"Got status for {streamsResponse.Data.Count} live streams");
+
+            foreach (var channel in newChannels)
+            {
+                channel.CurrentStream = streamsResponse.Data.FirstOrDefault(s => s.UserId == channel.UserId);
+            }
+
+            _channels = newChannels;
+            Console.WriteLine($"=== UPDATE COMPLETE: {_channels.Count} channels loaded ===");
         }
-
-        var yaml = await File.ReadAllTextAsync(_config.SubscriptionsPath);
-        var deserializer = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();
-
-        var subs = deserializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(yaml);
-        if (!subs.ContainsKey("subscriptions")) return;
-
-        var logins = subs["subscriptions"].Keys.ToList();
-        
-        await EnsureAccessToken();
-
-        // Get User IDs
-        var usersResponse = await "https://api.twitch.tv/helix/users"
-            .WithHeader("Client-ID", _config.ClientId)
-            .WithOAuthBearerToken(_accessToken)
-            .SetQueryParam("login", logins)
-            .GetJsonAsync<TwitchResponse<TwitchUser>>();
-
-        var newChannels = usersResponse.Data.Select(u => new ChannelInfo
+        catch (Exception ex)
         {
-            Login = u.Login,
-            DisplayName = u.DisplayName,
-            UserId = u.Id,
-            ProfileImageUrl = u.ProfileImageUrl
-        }).ToList();
-
-        // Get Stream Status
-        var streamsResponse = await "https://api.twitch.tv/helix/streams"
-            .WithHeader("Client-ID", _config.ClientId)
-            .WithOAuthBearerToken(_accessToken)
-            .SetQueryParam("user_id", newChannels.Select(c => c.UserId))
-            .GetJsonAsync<TwitchResponse<TwitchStream>>();
-
-        foreach (var channel in newChannels)
-        {
-            channel.CurrentStream = streamsResponse.Data.FirstOrDefault(s => s.UserId == channel.UserId);
+            Console.WriteLine($"ERROR in UpdateChannelsAsync: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
         }
-
-        _channels = newChannels;
     }
 
     public List<ChannelInfo> GetChannels() => _channels;
