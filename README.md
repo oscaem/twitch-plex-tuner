@@ -2,6 +2,8 @@
 
 A lightweight C# DVR Tuner and IPTV Proxy for Twitch, optimized for Plex and Synology Docker (NAS).
 
+HEAVILY inspired by https://github.com/micahmo/twitch2tuner.
+
 ## Features
 - **High Performance**: Built on .NET 10 Minimal APIs for near-zero idle CPU/RAM usage.
 - **HDHomeRun Emulation**: Seamlessly discovered by Plex for Live TV & DVR.
