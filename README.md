@@ -39,7 +39,7 @@ services:
       - "5000:5000"
 
   threadfin:
-    image: fuzzymistborn/threadfin:latest
+    image: threadfin/threadfin:latest
     container_name: threadfin
     restart: always
     ports:
