@@ -25,7 +25,7 @@ version: '3.8'
 
 services:
   tpt:
-    image: ghcr.io/<your-github-username>/twitch-plex-tuner:latest
+    image: ghcr.io/oscaem/twitch-plex-tuner:main
     container_name: twitch-plex-tuner
     restart: always
     environment:
@@ -34,18 +34,18 @@ services:
       - BASE_URL=http://<DS216_IP>:5000
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
     volumes:
-      - /volume1/docker/ytdl-sub/config/subscriptions.yaml:/config/subscriptions.yaml
+      - /volume1/docker/twitch-plex-tuner/config/subscriptions.yaml:/config/subscriptions.yaml
     ports:
       - "5000:5000"
 
   threadfin:
-    image: threadfin/threadfin:latest
+    image: fyb3roptik/threadfin:latest
     container_name: threadfin
     restart: always
     ports:
       - "34400:34400"
     volumes:
-      - ./threadfin/conf:/home/threadfin/conf
+      - /volume1/docker/twitch-plex-tuner/threadfin/conf:/home/threadfin/conf
 ```
 
 ### 3. Setup in Threadfin
