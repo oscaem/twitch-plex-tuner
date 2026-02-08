@@ -54,7 +54,7 @@ public class TunerService
         for (int i = 0; i < channels.Count; i++)
         {
             var c = channels[i];
-            sb.AppendLine($"#EXTINF:-1 tvg-id=\"{c.Login}\" tvg-name=\"{c.DisplayName}\" tvg-logo=\"{c.ProfileImageUrl}\" group-title=\"Twitch\",{c.DisplayName}");
+            sb.AppendLine($"#EXTINF:-1 tvg-id=\"{c.Login}\" tvg-chno=\"{i + 1}\" tvg-name=\"{c.DisplayName}\" tvg-logo=\"{c.ProfileImageUrl}\" group-title=\"Twitch\",{c.DisplayName}");
             sb.AppendLine($"{_config.BaseUrl}/stream/{c.Login}");
         }
         return sb.ToString();
@@ -74,7 +74,7 @@ public class TunerService
 
             // Generate a 24-hour program schedule showing channel as potentially live
             var prog = new XElement("programme",
-                new XAttribute("start", DateTime.UtcNow.ToString("yyyyMMddHHmmss +0000")),
+                new XAttribute("start", DateTime.UtcNow.AddHours(-1).ToString("yyyyMMddHHmmss +0000")),
                 new XAttribute("stop", DateTime.UtcNow.AddHours(24).ToString("yyyyMMddHHmmss +0000")),
                 new XAttribute("channel", c.Login),
                 new XElement("title", $"{c.DisplayName} on Twitch"),
@@ -83,6 +83,6 @@ public class TunerService
             doc.Root!.Add(prog);
         }
 
-        return doc.ToString();
+        return new XDeclaration("1.0", "utf-8", null) + Environment.NewLine + doc.ToString();
     }
 }

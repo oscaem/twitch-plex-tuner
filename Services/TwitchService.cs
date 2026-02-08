@@ -20,7 +20,7 @@ public class TwitchService
         _config = config.Value;
     }
 
-    public async Task UpdateChannelsAsync()
+    public virtual async Task UpdateChannelsAsync()
     {
         try
         {
@@ -94,5 +94,5 @@ public class TwitchService
         }
     }
 
-    public List<ChannelInfo> GetChannels() => _channels;
+    public virtual List<ChannelInfo> GetChannels() => _channels;
 }

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TwitchPlexTuner.csproj" />
+  <Project Path="TwitchPlexTuner.Tests/TwitchPlexTuner.Tests.csproj" />
+</Solution>

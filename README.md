@@ -8,29 +8,55 @@ A lightweight C# DVR Tuner and IPTV Proxy for Twitch, specifically optimized for
 - **Dynamic M3U/XMLTV**: Automatically generates playlists and guide data from your subscriptions.
 - **Streamlink Powered**: Uses the gold standard for Twitch stream extraction.
 - **Flexible YAML Support**: Works with both `twitch_recorder` (ytdl-sub) and `subscriptions` formats.
+- **Nuclear Testing**: Includes a rigorous pre-build test suite (`test-nuclear.sh`).
 
 ---
 
-## Quick Start
+## 🚀 Quick Start (Local)
+
+Follow these atomic steps to get up and running locally.
 
 ### 1. Prerequisites
-- **Twitch API Credentials**: Register an app at the [Twitch Dev Console](https://dev.twitch.tv/) to get your `CLIENT_ID` and `CLIENT_SECRET`.
-- **Subscriptions File**: A `subscriptions.yaml` file containing your Twitch channels:
+Ensure you have the following installed:
+- **.NET SDK**: [NET 9.0 or higher](https://dotnet.microsoft.com/download)
+- **Streamlink**: Required for fetching live streams.
+  - **macOS**: `brew install streamlink`
+  - **Linux/Windows**: `pip install streamlink`
 
+### 2. Configuration
+Create a `subscriptions.yaml` file in the project root:
 ```yaml
 twitch_recorder:
-  "EdeLive": "https://www.twitch.tv/edelive"
-  "Nils": "https://www.twitch.tv/nils"
-  # Add more channels...
+  "Channel Name": "https://www.twitch.tv/channelname"
+  "Another Channel": "https://www.twitch.tv/anotherchannel"
 ```
 
-### 2. Docker Deployment
+### 3. Verify Environment (Nuclear Test)
+Run the included nuclear test script to verify dependencies, build the solution, and run unit tests.
+```bash
+chmod +x test-nuclear.sh
+./test-nuclear.sh
+```
+*If this fails, follow the output instructions to fix missing dependencies.*
 
-Create a `compose.yaml`:
+### 4. Run Application
+Run the tuner. We recommend using port **5002** to avoid conflicts with macOS AirPlay (port 5000).
 
+```bash
+dotnet run --project TwitchPlexTuner.csproj --urls=http://localhost:5002
+```
+
+### 5. Connect Clients
+- **Playlist (M3U)**: `http://localhost:5002/playlist.m3u`
+- **Guide (XMLTV)**: `http://localhost:5002/epg.xml`
+- **Stream**: `http://localhost:5002/stream/{channel_login}`
+
+---
+
+## 🐳 Docker Deployment
+
+### 1. Create `compose.yaml`
 ```yaml
-version: '3.8'
-
 services:
   tpt:
     image: ghcr.io/oscaem/twitch-plex-tuner:main
@@ -44,77 +70,26 @@ services:
     volumes:
       - /path/to/your/subscriptions.yaml:/config/subscriptions.yaml
     ports:
-      - "5200:5000"  # External:Internal
-
-  threadfin:
-    image: fyb3roptik/threadfin:latest
-    container_name: threadfin
-    restart: always
-    ports:
-      - "34400:34400"
-    volumes:
-      - ./threadfin/conf:/home/threadfin/conf
+      - "5200:5000"
 ```
 
-### 3. Verify Endpoints
-
-After starting the containers, test:
-- **Playlist**: `http://<YOUR_NAS_IP>:5200/playlist.m3u`
-- **EPG**: `http://<YOUR_NAS_IP>:5200/epg.xml`
-- **Discovery**: `http://<YOUR_NAS_IP>:5200/discover.json`
-
-### 4. Configure Threadfin
-
-Access Threadfin at `http://<YOUR_NAS_IP>:34400`:
-1. Add **M3U Source**: `http://twitch-plex-tuner:5000/playlist.m3u`
-2. Add **XMLTV Source**: `http://twitch-plex-tuner:5000/epg.xml`
-3. Enable buffer (recommended for Plex compatibility)
-
-### 5. Add to Plex
-
-1. Go to **Plex Settings** → **Live TV & DVR**
-2. Add Device: `http://<YOUR_NAS_IP>:34400`
-3. Scan channels and match guide data
+### 2. Run
+```bash
+docker-compose up -d
+```
 
 ---
 
 ## Troubleshooting
 
-### Check Container Logs
-```bash
-docker logs -f twitch-plex-tuner
-```
+### "Streamlink not found"
+- Ensure `streamlink` is in your system PATH.
+- Run `./test-nuclear.sh` to diagnose.
 
-Look for:
-- `=== UPDATE CHANNELS START ===`
-- `Found X channels: ...`
-- `=== UPDATE COMPLETE: X channels loaded ===`
+### "Address already in use"
+- Port 5000 is often used by system services (Control Center on macOS).
+- Use `--urls=http://localhost:5002` to bind to a different port.
 
-### Empty Playlist/EPG
-- Verify `CLIENT_ID` and `CLIENT_SECRET` are set correctly
-- Check that `subscriptions.yaml` is mounted correctly
-- Ensure the YAML structure uses `twitch_recorder:` or `subscriptions:` as the top-level key
-
----
-
-## Development
-
-### Local Build
-```bash
-dotnet build
-```
-
-### Docker Build
-```bash
-docker build -t twitch-plex-tuner .
-```
-
-### CI/CD
-The included GitHub Actions workflow automatically builds and publishes to `ghcr.io` on every push to main.
-
----
-
-## Architecture
-- **TwitchPlexTuner**: C# application managing Twitch API, M3U/XMLTV generation, and HDHomeRun emulation
-- **Streamlink**: Python-based stream extractor (bundled in Docker image)
-- **Threadfin** (optional): Provides buffering for improved Plex compatibility
+### Empty EPG/Playlist
+- Ensure `subscriptions.yaml` is formatted correctly.
+- Check logs for "Loaded X channels".

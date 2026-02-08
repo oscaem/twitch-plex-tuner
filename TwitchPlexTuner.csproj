@@ -13,4 +13,11 @@
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="TwitchPlexTuner.Tests\**" />
+    <Content Remove="TwitchPlexTuner.Tests\**" />
+    <EmbeddedResource Remove="TwitchPlexTuner.Tests\**" />
+    <None Remove="TwitchPlexTuner.Tests\**" />
+  </ItemGroup>
+
 </Project>
