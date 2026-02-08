@@ -19,8 +19,9 @@ public class TunerService
         _twitchService = twitchService;
     }
 
-    public object GetDiscover()
+    public object GetDiscover(string? baseUrl = null)
     {
+        var effectiveBaseUrl = baseUrl ?? _config.BaseUrl;
         return new
         {
             FriendlyName = "Twitch Tuner",
@@ -31,23 +32,25 @@ public class TunerService
             TunerCount = 5,
             DeviceID = "TPT12345",
             DeviceAuth = "none",
-            BaseURL = _config.BaseUrl,
-            LineupURL = $"{_config.BaseUrl}/lineup.json"
+            BaseURL = effectiveBaseUrl,
+            LineupURL = $"{effectiveBaseUrl}/lineup.json"
         };
     }
 
-    public List<object> GetLineup()
+    public List<object> GetLineup(string? baseUrl = null)
     {
+        var effectiveBaseUrl = baseUrl ?? _config.BaseUrl;
         return _twitchService.GetChannels().Select((c, i) => new
         {
             GuideName = c.DisplayName,
             GuideNumber = (i + 1).ToString(),
-            URL = $"{_config.BaseUrl}/stream/{c.Login}"
+            URL = $"{effectiveBaseUrl}/stream/{c.Login}"
         }).Cast<object>().ToList();
     }
 
-    public string GetM3U()
+    public string GetM3U(string? baseUrl = null)
     {
+        var effectiveBaseUrl = baseUrl ?? _config.BaseUrl;
         var sb = new StringBuilder();
         sb.AppendLine("#EXTM3U");
         var channels = _twitchService.GetChannels();
@@ -55,7 +58,7 @@ public class TunerService
         {
             var c = channels[i];
             sb.AppendLine($"#EXTINF:-1 tvg-id=\"{c.Login}\" tvg-chno=\"{i + 1}\" tvg-name=\"{c.DisplayName}\" tvg-logo=\"{c.ProfileImageUrl}\" group-title=\"Twitch\",{c.DisplayName}");
-            sb.AppendLine($"{_config.BaseUrl}/stream/{c.Login}");
+            sb.AppendLine($"{effectiveBaseUrl}/stream/{c.Login}");
         }
         return sb.ToString();
     }

@@ -16,20 +16,29 @@ public class TunerController : ControllerBase
     }
 
     [HttpGet("discover.json")]
-    public IActionResult Discover() => Ok(_tunerService.GetDiscover());
+    public IActionResult Discover()
+    {
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        return Ok(_tunerService.GetDiscover(baseUrl));
+    }
 
     [HttpGet("lineup_status.json")]
     public IActionResult LineupStatus() => Ok(new { ScanInProgress = 0, ScanPossible = 1, Source = "Cable", SourceList = new[] { "Cable" } });
 
     [HttpGet("lineup.json")]
-    public IActionResult Lineup() => Ok(_tunerService.GetLineup());
+    public IActionResult Lineup()
+    {
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        return Ok(_tunerService.GetLineup(baseUrl));
+    }
 
     [HttpGet("playlist.m3u")]
     public IActionResult Playlist()
     {
         try
         {
-            return Content(_tunerService.GetM3U(), "text/plain");
+            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            return Content(_tunerService.GetM3U(baseUrl), "text/plain");
         }
         catch (Exception ex)
         {

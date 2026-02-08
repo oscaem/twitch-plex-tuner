@@ -37,35 +37,7 @@ public class StreamController : ControllerBase
 
         try
         {
-            process.Start();
-
-            var stdout = process.StandardOutput.BaseStream;
-            var initialBuffer = new byte[1]; 
-            
-            // Wait for exactly ONE byte to prove the stream is valid
-            // 64KB was taking 5 seconds to fill, which is too slow for Plex.
-            int bytesRead = await stdout.ReadAsync(initialBuffer, 0, 1, HttpContext.RequestAborted);
-            
-            if (bytesRead <= 0)
-            {
-                // Give it a tiny bit of time to exit so we can catch the error message
-                await Task.Delay(500);
-                if (process.HasExited && process.ExitCode != 0)
-                {
-                    var error = await process.StandardError.ReadToEndAsync();
-                    _logger.LogError("Streamlink failed for {Login}: {Error}", login, error);
-                }
-                else
-                {
-                    _logger.LogWarning("Streamlink produced no data for {Login}", login);
-                }
-                
-                Response.StatusCode = 500;
-                return;
-            }
-
-            _logger.LogInformation("[{Login}] First byte received in {Elapsed}ms. Starting stream.", login, sw.ElapsedMilliseconds);
-
+            // 1. Send Headers IMMEDIATELY to satisfy Plex's connection timer
             Response.ContentType = "video/mp2t"; 
             Response.Headers["Cache-Control"] = "no-cache";
             
@@ -74,6 +46,25 @@ public class StreamController : ControllerBase
             {
                 responseBodyFeature.DisableBuffering();
             }
+
+            // This forces the 200 OK to the client right now
+            await Response.Body.FlushAsync(HttpContext.RequestAborted);
+
+            process.Start();
+
+            var stdout = process.StandardOutput.BaseStream;
+            var initialBuffer = new byte[1]; 
+            
+            // Wait for data
+            int bytesRead = await stdout.ReadAsync(initialBuffer, 0, 1, HttpContext.RequestAborted);
+            
+            if (bytesRead <= 0)
+            {
+                _logger.LogWarning("[{Login}] Streamlink produced no data.", login);
+                return;
+            }
+
+            _logger.LogInformation("[{Login}] Stream started in {Elapsed}ms.", login, sw.ElapsedMilliseconds);
 
             // Write that first byte
             await Response.Body.WriteAsync(initialBuffer.AsMemory(0, 1), HttpContext.RequestAborted);
