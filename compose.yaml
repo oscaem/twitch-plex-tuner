@@ -16,7 +16,7 @@ services:
       - "5000:5000"
 
   threadfin:
-    image: threadfin/threadfin:latest
+    image: fyb3roptik/threadfin
     container_name: threadfin
     restart: always
     ports:
