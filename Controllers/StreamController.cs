@@ -26,7 +26,7 @@ public class StreamController : ControllerBase
         var processStartInfo = new ProcessStartInfo
         {
             FileName = "streamlink",
-            Arguments = $"{url} best --stdout --quiet --twitch-disable-ads --twitch-low-latency --twitch-disable-hosting --twitch-disable-reruns --hls-live-edge 1 --stream-segment-threads 2",
+            Arguments = $"{url} best --stdout --quiet --twitch-disable-ads --twitch-disable-hosting --twitch-disable-reruns --hls-live-edge 3 --stream-segment-threads 2 --hls-segment-ignore-redirect",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -37,7 +37,33 @@ public class StreamController : ControllerBase
 
         try
         {
-            // 1. Send Headers IMMEDIATELY to satisfy Plex's connection timer
+            process.Start();
+
+            var stdout = process.StandardOutput.BaseStream;
+            var burstBuffer = new byte[131072]; // 128KB burst to prime the pump
+            
+            _logger.LogDebug("[{Login}] Probing stream...", login);
+
+            // Wait until we have a healthy burst of data
+            // This masks the "probe" time and prevents the stream from starting empty
+            int totalBytesRead = 0;
+            while (totalBytesRead < burstBuffer.Length)
+            {
+                int read = await stdout.ReadAsync(burstBuffer.AsMemory(totalBytesRead, burstBuffer.Length - totalBytesRead), HttpContext.RequestAborted);
+                if (read <= 0) break;
+                totalBytesRead += read;
+            }
+            
+            if (totalBytesRead <= 0)
+            {
+                _logger.LogWarning("[{Login}] Streamlink produced no data.", login);
+                Response.StatusCode = 500;
+                return;
+            }
+
+            _logger.LogInformation("[{Login}] Stream burst ready ({Bytes} bytes) in {Elapsed}ms.", login, totalBytesRead, sw.ElapsedMilliseconds);
+
+            // 1. Send Headers ONLY when we actually have data to send
             Response.ContentType = "video/mp2t"; 
             Response.Headers["Cache-Control"] = "no-cache";
             
@@ -47,27 +73,8 @@ public class StreamController : ControllerBase
                 responseBodyFeature.DisableBuffering();
             }
 
-            // This forces the 200 OK to the client right now
-            await Response.Body.FlushAsync(HttpContext.RequestAborted);
-
-            process.Start();
-
-            var stdout = process.StandardOutput.BaseStream;
-            var initialBuffer = new byte[1]; 
-            
-            // Wait for data
-            int bytesRead = await stdout.ReadAsync(initialBuffer, 0, 1, HttpContext.RequestAborted);
-            
-            if (bytesRead <= 0)
-            {
-                _logger.LogWarning("[{Login}] Streamlink produced no data.", login);
-                return;
-            }
-
-            _logger.LogInformation("[{Login}] Stream started in {Elapsed}ms.", login, sw.ElapsedMilliseconds);
-
-            // Write that first byte
-            await Response.Body.WriteAsync(initialBuffer.AsMemory(0, 1), HttpContext.RequestAborted);
+            // Write the burst
+            await Response.Body.WriteAsync(burstBuffer.AsMemory(0, totalBytesRead), HttpContext.RequestAborted);
             
             // Continue streaming everything else
             await stdout.CopyToAsync(Response.Body, HttpContext.RequestAborted);
