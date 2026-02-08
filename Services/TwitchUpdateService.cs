@@ -32,7 +32,7 @@ public class TwitchUpdateService : BackgroundService
                 _logger.LogError(ex, "Error updating Twitch channels");
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(3), stoppingToken);
+            await Task.Delay(TimeSpan.FromMinutes(15), stoppingToken);
         }
     }
 }
