@@ -14,8 +14,6 @@ RUN apk add --no-cache python3 py3-pip && \
     pip install --break-system-packages streamlink
 
 # Environment Variables Defaults
-ENV CLIENT_ID=""
-ENV CLIENT_SECRET=""
 ENV SUBSCRIPTIONS_PATH="/config/subscriptions.yaml"
 ENV BASE_URL="http://localhost:5000"
 ENV ASPNETCORE_URLS="http://+:5000"
