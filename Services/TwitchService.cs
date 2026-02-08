@@ -89,9 +89,8 @@ public class TwitchService
                         // Get Users (for real Profile Image)
                         var usersReq = "https://api.twitch.tv/helix/users"
                             .WithHeader("Client-ID", _config.ClientId)
-                            .WithHeader("Authorization", $"Bearer {accessToken}");
-                        
-                        foreach(var login in userLogins) usersReq.SetQueryParam("login", login, true);
+                            .WithHeader("Authorization", $"Bearer {accessToken}")
+                            .SetQueryParam("login", userLogins);
                         
                         var usersResp = await usersReq.GetJsonAsync<TwitchResponse<TwitchUser>>();
                         foreach(var user in usersResp.Data)
@@ -103,9 +102,8 @@ public class TwitchService
                         // Get Streams (for Live Status)
                         var streamsReq = "https://api.twitch.tv/helix/streams"
                             .WithHeader("Client-ID", _config.ClientId)
-                            .WithHeader("Authorization", $"Bearer {accessToken}");
-                        
-                        foreach(var login in userLogins) streamsReq.SetQueryParam("user_login", login, true);
+                            .WithHeader("Authorization", $"Bearer {accessToken}")
+                            .SetQueryParam("user_login", userLogins);
 
                         var streamsResp = await streamsReq.GetJsonAsync<TwitchResponse<TwitchStream>>();
                         foreach(var stream in streamsResp.Data)
