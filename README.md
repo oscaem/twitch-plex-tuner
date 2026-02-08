@@ -3,22 +3,30 @@
 A lightweight C# DVR Tuner and IPTV Proxy for Twitch, specifically optimized for Plex and NAS devices like the DS216+.
 
 ## Features
-- **High Performance**: Built on .NET 9 Minimal APIs for near-zero idle CPU/RAM usage.
+- **High Performance**: Built on .NET 10 Minimal APIs for near-zero idle CPU/RAM usage.
 - **HDHomeRun Emulation**: Seamlessly discovered by Plex for Live TV & DVR.
 - **Dynamic M3U/XMLTV**: Automatically generates playlists and guide data from your subscriptions.
-- **Threadfin Integration**: Built-in compatibility with Threadfin for robust stream buffering and signal linearity.
 - **Streamlink Powered**: Uses the gold standard for Twitch stream extraction.
+- **Flexible YAML Support**: Works with both `twitch_recorder` (ytdl-sub) and `subscriptions` formats.
 
 ---
 
-## Deployment Guide (DS216+ / Docker)
+## Quick Start
 
 ### 1. Prerequisites
 - **Twitch API Credentials**: Register an app at the [Twitch Dev Console](https://dev.twitch.tv/) to get your `CLIENT_ID` and `CLIENT_SECRET`.
-- **Subscriptions File**: A `subscriptions.yaml` file (compatible with `ytdl-sub`) containing the list of channels you want to tune into.
+- **Subscriptions File**: A `subscriptions.yaml` file containing your Twitch channels:
 
-### 2. Configuration (`compose.yaml`)
-Create or update your `compose.yaml` with the following services:
+```yaml
+twitch_recorder:
+  "EdeLive": "https://www.twitch.tv/edelive"
+  "Nils": "https://www.twitch.tv/nils"
+  # Add more channels...
+```
+
+### 2. Docker Deployment
+
+Create a `compose.yaml`:
 
 ```yaml
 version: '3.8'
@@ -29,14 +37,14 @@ services:
     container_name: twitch-plex-tuner
     restart: always
     environment:
-      - CLIENT_ID=your_client_id
-      - CLIENT_SECRET=your_client_secret
-      - BASE_URL=http://<DS216_IP>:5000
+      - CLIENT_ID=your_client_id_here
+      - CLIENT_SECRET=your_client_secret_here
+      - BASE_URL=http://<YOUR_NAS_IP>:5200
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
     volumes:
-      - /volume1/docker/twitch-plex-tuner/config/subscriptions.yaml:/config/subscriptions.yaml
+      - /path/to/your/subscriptions.yaml:/config/subscriptions.yaml
     ports:
-      - "5000:5000"
+      - "5200:5000"  # External:Internal
 
   threadfin:
     image: fyb3roptik/threadfin:latest
@@ -45,35 +53,68 @@ services:
     ports:
       - "34400:34400"
     volumes:
-      - /volume1/docker/twitch-plex-tuner/threadfin/conf:/home/threadfin/conf
+      - ./threadfin/conf:/home/threadfin/conf
 ```
 
-### 3. Setup in Threadfin
-1.  Access Threadfin at `http://<DS216_IP>:34400`.
-2.  **M3U Source**: Add a new M3U source pointing to `http://twitch-plex-tuner:5000/playlist.m3u`.
-3.  **XMLTV Source**: Add a new XMLTV source pointing to `http://twitch-plex-tuner:5000/epg.xml`.
-4.  **Buffer**: Ensure Threadfin is set to use its internal buffer (default) for best compatibility with Plex.
+### 3. Verify Endpoints
 
-### 4. Integration with Plex
-1.  Go to **Plex Settings** -> **Live TV & DVR**.
-2.  Click **Add Device**.
-3.  Enter the address of Threadfin: `http://<DS216_IP>:34400`.
-4.  Plex will scan the "channels" provided by `twitch-plex-tuner` via Threadfin.
-5.  Match the channels to the XMLTV guide data if prompted.
+After starting the containers, test:
+- **Playlist**: `http://<YOUR_NAS_IP>:5200/playlist.m3u`
+- **EPG**: `http://<YOUR_NAS_IP>:5200/epg.xml`
+- **Discovery**: `http://<YOUR_NAS_IP>:5200/discover.json`
+
+### 4. Configure Threadfin
+
+Access Threadfin at `http://<YOUR_NAS_IP>:34400`:
+1. Add **M3U Source**: `http://twitch-plex-tuner:5000/playlist.m3u`
+2. Add **XMLTV Source**: `http://twitch-plex-tuner:5000/epg.xml`
+3. Enable buffer (recommended for Plex compatibility)
+
+### 5. Add to Plex
+
+1. Go to **Plex Settings** → **Live TV & DVR**
+2. Add Device: `http://<YOUR_NAS_IP>:34400`
+3. Scan channels and match guide data
+
+---
+
+## Troubleshooting
+
+### Check Container Logs
+```bash
+docker logs -f twitch-plex-tuner
+```
+
+Look for:
+- `=== UPDATE CHANNELS START ===`
+- `Found X channels: ...`
+- `=== UPDATE COMPLETE: X channels loaded ===`
+
+### Empty Playlist/EPG
+- Verify `CLIENT_ID` and `CLIENT_SECRET` are set correctly
+- Check that `subscriptions.yaml` is mounted correctly
+- Ensure the YAML structure uses `twitch_recorder:` or `subscriptions:` as the top-level key
+
+---
+
+## Development
+
+### Local Build
+```bash
+dotnet build
+```
+
+### Docker Build
+```bash
+docker build -t twitch-plex-tuner .
+```
+
+### CI/CD
+The included GitHub Actions workflow automatically builds and publishes to `ghcr.io` on every push to main.
 
 ---
 
 ## Architecture
-- **TwitchPlexTuner**: The management layer. It handles the Twitch API, keeps track of live status, and serves the M3U/XMLTV files.
-- **Threadfin**: The signal proxy. It makes the irregular Twitch stream appear as a constant, linear signal to Plex.
-- **Streamlink**: The heavy-lifter. It extracts the raw video data from Twitch on demand.
-
----
-
-## Development & CI/CD
-This repository includes a GitHub Action that automatically builds and publishes a Docker image to GitHub Packages (`ghcr.io`) on every commit to the main branch.
-
-To build manually:
-```bash
-docker build -t twitch-plex-tuner .
-```
+- **TwitchPlexTuner**: C# application managing Twitch API, M3U/XMLTV generation, and HDHomeRun emulation
+- **Streamlink**: Python-based stream extractor (bundled in Docker image)
+- **Threadfin** (optional): Provides buffering for improved Plex compatibility

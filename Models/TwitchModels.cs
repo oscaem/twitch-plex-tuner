@@ -41,8 +41,5 @@ public class ChannelInfo
 {
     public string Login { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
     public string ProfileImageUrl { get; set; } = string.Empty;
-    public TwitchStream? CurrentStream { get; set; }
-    public bool IsLive => CurrentStream != null;
 }

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Flurl.Http;
 using Microsoft.Extensions.Options;
 using TwitchPlexTuner.Models;
 using YamlDotNet.Serialization;
@@ -14,8 +13,6 @@ namespace TwitchPlexTuner.Services;
 public class TwitchService
 {
     private readonly TwitchConfig _config;
-    private string _accessToken = string.Empty;
-    private DateTime _tokenExpiry = DateTime.MinValue;
     private List<ChannelInfo> _channels = new();
 
     public TwitchService(IOptions<TwitchConfig> config)
@@ -23,31 +20,11 @@ public class TwitchService
         _config = config.Value;
     }
 
-    private async Task EnsureAccessToken()
-    {
-        if (!string.IsNullOrEmpty(_accessToken) && DateTime.UtcNow < _tokenExpiry) return;
-
-        var response = await "https://id.twitch.tv/oauth2/token"
-            .PostUrlEncodedAsync(new
-            {
-                client_id = _config.ClientId,
-                client_secret = _config.ClientSecret,
-                grant_type = "client_credentials"
-            })
-            .ReceiveJson<dynamic>();
-
-        _accessToken = response.access_token;
-        int expiresIn = (int)response.expires_in;
-        _tokenExpiry = DateTime.UtcNow.AddSeconds(expiresIn - 60);
-    }
-
     public async Task UpdateChannelsAsync()
     {
         try
         {
-            Console.WriteLine($"=== UPDATE CHANNELS START ===");
-            Console.WriteLine($"ClientId: {(_config.ClientId?.Length > 0 ? "SET" : "MISSING")}");
-            Console.WriteLine($"ClientSecret: {(_config.ClientSecret?.Length > 0 ? "SET" : "MISSING")}");
+            Console.WriteLine($"=== LOADING CHANNELS FROM YAML ===");
             Console.WriteLine($"SubscriptionsPath: {_config.SubscriptionsPath}");
 
             if (!File.Exists(_config.SubscriptionsPath))
@@ -83,53 +60,32 @@ public class TwitchService
                 return;
             }
 
-            // Extract login names from Twitch URLs
-            var logins = channelDict.Values
-                .Select(url => url.Split('/').Last().ToLower())
-                .Where(login => !string.IsNullOrEmpty(login))
-                .ToList();
-
-            Console.WriteLine($"Found {logins.Count} channels: {string.Join(", ", logins)}");
-
-            Console.WriteLine("Getting access token...");
-            await EnsureAccessToken();
-            Console.WriteLine("Access token obtained");
-
-            // Get User IDs
-            Console.WriteLine("Fetching user data from Twitch API...");
-            var usersResponse = await "https://api.twitch.tv/helix/users"
-                .WithHeader("Client-ID", _config.ClientId)
-                .WithOAuthBearerToken(_accessToken)
-                .SetQueryParam("login", logins)
-                .GetJsonAsync<TwitchResponse<TwitchUser>>();
-
-            Console.WriteLine($"Got {usersResponse.Data.Count} users from Twitch");
-
-            var newChannels = usersResponse.Data.Select(u => new ChannelInfo
+            // Extract login names from Twitch URLs and create simple channel info
+            var newChannels = new List<ChannelInfo>();
+            foreach (var kvp in channelDict)
             {
-                Login = u.Login,
-                DisplayName = u.DisplayName,
-                UserId = u.Id,
-                ProfileImageUrl = u.ProfileImageUrl
-            }).ToList();
+                var displayName = kvp.Key;
+                var url = kvp.Value;
+                var login = url.Split('/').Last().ToLower();
 
-            // Get Stream Status
-            Console.WriteLine("Fetching stream status...");
-            var streamsResponse = await "https://api.twitch.tv/helix/streams"
-                .WithHeader("Client-ID", _config.ClientId)
-                .WithOAuthBearerToken(_accessToken)
-                .SetQueryParam("user_id", newChannels.Select(c => c.UserId))
-                .GetJsonAsync<TwitchResponse<TwitchStream>>();
+                if (string.IsNullOrEmpty(login))
+                {
+                    Console.WriteLine($"WARNING: Skipping invalid URL: {url}");
+                    continue;
+                }
 
-            Console.WriteLine($"Got status for {streamsResponse.Data.Count} live streams");
-
-            foreach (var channel in newChannels)
-            {
-                channel.CurrentStream = streamsResponse.Data.FirstOrDefault(s => s.UserId == channel.UserId);
+                newChannels.Add(new ChannelInfo
+                {
+                    Login = login,
+                    DisplayName = displayName,
+                    // We'll use a default profile image URL structure
+                    ProfileImageUrl = $"https://static-cdn.jtvnw.net/jtv_user_pictures/{login}-profile_image-300x300.png"
+                });
             }
 
             _channels = newChannels;
-            Console.WriteLine($"=== UPDATE COMPLETE: {_channels.Count} channels loaded ===");
+            Console.WriteLine($"=== LOADED {_channels.Count} CHANNELS ===");
+            Console.WriteLine($"Channels: {string.Join(", ", _channels.Select(c => c.Login))}");
         }
         catch (Exception ex)
         {

@@ -64,7 +64,7 @@ public class TunerService
     {
         var channels = _twitchService.GetChannels();
         var doc = new XDocument(new XElement("tv"));
-        
+
         foreach (var c in channels)
         {
             var channelElem = new XElement("channel", new XAttribute("id", c.Login),
@@ -72,28 +72,15 @@ public class TunerService
                 new XElement("icon", new XAttribute("src", c.ProfileImageUrl)));
             doc.Root!.Add(channelElem);
 
-            if (c.IsLive)
-            {
-                var prog = new XElement("programme",
-                    new XAttribute("start", c.CurrentStream!.StartedAt.ToString("yyyyMMddHHmmss +0000")),
-                    new XAttribute("stop", DateTime.UtcNow.AddHours(24).ToString("yyyyMMddHHmmss +0000")),
-                    new XAttribute("channel", c.Login),
-                    new XElement("title", c.CurrentStream.Title),
-                    new XElement("desc", $"Playing {c.CurrentStream.GameName}"),
-                    new XElement("category", "Live"));
-                doc.Root!.Add(prog);
-            }
-            else
-            {
-                var prog = new XElement("programme",
-                    new XAttribute("start", DateTime.UtcNow.ToString("yyyyMMddHHmmss +0000")),
-                    new XAttribute("stop", DateTime.UtcNow.AddHours(24).ToString("yyyyMMddHHmmss +0000")),
-                    new XAttribute("channel", c.Login),
-                    new XElement("title", $"{c.DisplayName} - Offline"),
-                    new XElement("desc", "Streamer is currently offline."),
-                    new XElement("category", "Offline"));
-                doc.Root!.Add(prog);
-            }
+            // Generate a 24-hour program schedule showing channel as potentially live
+            var prog = new XElement("programme",
+                new XAttribute("start", DateTime.UtcNow.ToString("yyyyMMddHHmmss +0000")),
+                new XAttribute("stop", DateTime.UtcNow.AddHours(24).ToString("yyyyMMddHHmmss +0000")),
+                new XAttribute("channel", c.Login),
+                new XElement("title", $"{c.DisplayName} on Twitch"),
+                new XElement("desc", "Live stream from Twitch"),
+                new XElement("category", "Gaming"));
+            doc.Root!.Add(prog);
         }
 
         return doc.ToString();
