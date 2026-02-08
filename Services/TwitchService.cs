@@ -72,7 +72,7 @@ public class TwitchService
                             client_secret = _config.ClientSecret,
                             grant_type = "client_credentials"
                         })
-                        .ReceiveJson<dynamic>();
+                        .ReceiveJson<TwitchTokenResponse>();
 
                     string accessToken = tokenResp.access_token;
                     
