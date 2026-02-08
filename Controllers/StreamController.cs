@@ -41,26 +41,44 @@ public class StreamController : ControllerBase
         {
             process.Start();
 
-            // Check if it exits immediately
-            if (process.WaitForExit(1000) && process.ExitCode != 0)
+            var stdout = process.StandardOutput.BaseStream;
+            var buffer = new byte[4096]; // Read a decent chunk to be sure
+            
+            // Wait for data with a timeout (implied by HttpContext.RequestAborted or we can add a Task.Delay)
+            int bytesRead = await stdout.ReadAsync(buffer, 0, buffer.Length, HttpContext.RequestAborted);
+            
+            if (bytesRead <= 0)
             {
-                var error = await process.StandardError.ReadToEndAsync();
-                _logger.LogError("Streamlink failed immediately for {Login}: {Error}", login, error);
+                if (process.HasExited && process.ExitCode != 0)
+                {
+                    var error = await process.StandardError.ReadToEndAsync();
+                    _logger.LogError("Streamlink failed for {Login}: {Error}", login, error);
+                }
+                else
+                {
+                    _logger.LogWarning("Streamlink produced no data for {Login}", login);
+                }
+                
                 Response.StatusCode = 500;
                 return;
             }
 
+            _logger.LogInformation("Streaming data started for {Login} ({Bytes} bytes in first read)", login, bytesRead);
+
             Response.ContentType = "video/mp2t"; // MPEG-TS is best for Plex
             Response.Headers["Cache-Control"] = "no-cache";
             
-            // Disable response buffering to ensure valid "low latency" streaming
             var responseBodyFeature = HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
             if (responseBodyFeature != null)
             {
                 responseBodyFeature.DisableBuffering();
             }
 
-            await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, HttpContext.RequestAborted);
+            // Write the first chunk we already read
+            await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), HttpContext.RequestAborted);
+            
+            // Continue streaming
+            await stdout.CopyToAsync(Response.Body, HttpContext.RequestAborted);
         }
         catch (OperationCanceledException)
         {
