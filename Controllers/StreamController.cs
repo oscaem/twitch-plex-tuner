@@ -17,18 +17,15 @@ public class StreamController : ControllerBase
     public async Task GetStream(string login)
     {
         _logger.LogInformation("Starting stream for {Login}", login);
+        var sw = Stopwatch.StartNew();
 
         var url = $"twitch.tv/{login}";
-
-        // 1. Direct Stream Launch (Optimized for speed)
-        // We skp the pre-check because it adds 2s latency which causes Plex to timeout.
-        // If the stream is offline, the main process below will exit immediately and return 500.
 
         // 2. Start actual stream
         var processStartInfo = new ProcessStartInfo
         {
             FileName = "streamlink",
-            Arguments = $"{url} best --stdout --quiet --twitch-disable-ads --hls-live-edge 2 --stream-segment-threads 4",
+            Arguments = $"{url} best --stdout --quiet --twitch-disable-ads --twitch-low-latency --hls-live-edge 1 --stream-segment-threads 3",
             RedirectStandardOutput = true,
             RedirectStandardError = true, // Capture error
             UseShellExecute = false,
@@ -42,10 +39,11 @@ public class StreamController : ControllerBase
             process.Start();
 
             var stdout = process.StandardOutput.BaseStream;
-            var buffer = new byte[4096]; // Read a decent chunk to be sure
+            var buffer = new byte[65536]; // Read 64KB to prime FFmpeg/Threadfin instantly
             
-            // Wait for data with a timeout (implied by HttpContext.RequestAborted or we can add a Task.Delay)
+            _logger.LogDebug("[{Login}] Waiting for streamlink data...", login);
             int bytesRead = await stdout.ReadAsync(buffer, 0, buffer.Length, HttpContext.RequestAborted);
+            _logger.LogInformation("[{Login}] Received {Bytes} bytes in {Elapsed}ms", login, bytesRead, sw.ElapsedMilliseconds);
             
             if (bytesRead <= 0)
             {
@@ -63,8 +61,6 @@ public class StreamController : ControllerBase
                 return;
             }
 
-            _logger.LogInformation("Streaming data started for {Login} ({Bytes} bytes in first read)", login, bytesRead);
-
             Response.ContentType = "video/mp2t"; // MPEG-TS is best for Plex
             Response.Headers["Cache-Control"] = "no-cache";
             
@@ -76,6 +72,7 @@ public class StreamController : ControllerBase
 
             // Write the first chunk we already read
             await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), HttpContext.RequestAborted);
+            _logger.LogInformation("[{Login}] Headers and first chunk sent. Total startup: {Elapsed}ms", login, sw.ElapsedMilliseconds);
             
             // Continue streaming
             await stdout.CopyToAsync(Response.Body, HttpContext.RequestAborted);
