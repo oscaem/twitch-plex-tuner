@@ -16,6 +16,7 @@ builder.Services.Configure<TwitchConfig>(options =>
 builder.Services.AddSingleton<TwitchService>();
 builder.Services.AddSingleton<TunerService>();
 builder.Services.AddHostedService<TwitchUpdateService>();
+builder.Services.AddHostedService<RecordingService>();
 builder.Services.AddControllers();
 
 var app = builder.Build();

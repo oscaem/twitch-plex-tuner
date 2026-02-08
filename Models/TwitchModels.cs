@@ -75,4 +75,5 @@ public class ChannelInfo
     public string GameName { get; set; } = string.Empty;
     public string StreamThumbnailUrl { get; set; } = string.Empty;
     public DateTime? StartedAt { get; set; }
+    public string? StreamId { get; set; }  // Used for cache invalidation
 }

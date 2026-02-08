@@ -6,59 +6,66 @@ A lightweight C# DVR Tuner and IPTV Proxy for Twitch, optimized for Plex and Syn
 - **High Performance**: Built on .NET 10 Minimal APIs for near-zero idle CPU/RAM usage.
 - **HDHomeRun Emulation**: Seamlessly discovered by Plex for Live TV & DVR.
 - **Dynamic M3U/XMLTV**: Automatically generates playlists and guide data from your subscriptions.
-- **Streamlink Powered**: Uses the gold standard for Twitch stream extraction.
+- **Dual Streaming Backend**: Uses Streamlink for URL discovery + yt-dlp for stable streaming.
+- **Integrated Recording**: Auto-records live streams without Plex Pass (optional).
+- **URL Caching**: Avoids re-discovery for faster channel switching.
 - **Flexible YAML Support**: Works with both `twitch_recorder` (ytdl-sub) and `subscriptions` formats.
-- **Nuclear Testing**: Includes a rigorous pre-build test suite (`test-nuclear.sh`).
 
 ---
 
 ## 🐳 Synology Docker Deployment
 
 ### 1. Prepare Configuration
-Create a folder on your NAS (e.g., `/docker/twitch-plex-tuner`) and add a `subscriptions.yaml` file:
+
+Create a folder on your NAS (e.g., `/volume1/docker/twitch-plex-tuner`) with:
+
+**`subscriptions.yaml`**:
 ```yaml
 twitch_recorder:
   "EdeLive": "https://www.twitch.tv/edelive"
   "Nils": "https://www.twitch.tv/nils"
 ```
 
-### 2. Create `compose.yaml` (Synology)
-Save this file in the same folder.
-> **Note**: Replace `YOUR_NAS_IP` with your Synology's actual IP address (e.g., `192.168.1.100`).
+**`.env`** (create this file):
+```bash
+CLIENT_ID=your_twitch_client_id
+CLIENT_SECRET=your_twitch_client_secret
+SUBSCRIPTIONS_PATH=./subscriptions.yaml
+RECORDING_PATH=/volume1/Media/Twitch
+```
+
+### 2. Create `compose.yaml`
 
 ```yaml
 services:
-  # The Antenna: Fetches Twitch streams and guide data
   tpt:
     image: ghcr.io/oscaem/twitch-plex-tuner:main
     container_name: twitch-plex-tuner
     restart: always
     environment:
-      - CLIENT_ID=your_twitch_client_id
-      - CLIENT_SECRET=your_twitch_client_secret
-      # IMPORTANT: This URL is used in the M3U/XMLTV files.
-      # It must be reachable by Threadfin.
-      - BASE_URL=http://twitch-plex-tuner:5000 
-      - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - BASE_URL=http://twitch-plex-tuner:5000
+      - STREAM_QUALITY=1080p60,1080p,720p60,720p,best
+      - RECORDING_PATH=/recordings  # Set to enable recording
     volumes:
-      - ./subscriptions.yaml:/config/subscriptions.yaml
+      - ./subscriptions.yaml:/config/subscriptions.yaml:ro
+      - ${RECORDING_PATH}:/recordings
     ports:
-      - "5200:5000" # Exposes tuner on port 5200 for debugging
+      - "5200:5000"
 
-  # The Manager: Buffers streams and presents them to Plex
   threadfin:
     image: fyb3roptik/threadfin:latest
     container_name: threadfin
     restart: always
     ports:
-      - "34400:34400" # Web UI and Stream Port
+      - "34400:34400"
     volumes:
       - ./threadfin/conf:/home/threadfin/conf
-      - ./threadfin/temp:/home/threadfin/temp
+      - ./threadfin/temp:/tmp/threadfin
 ```
 
 ### 3. Start Containers
-Run via Container Manager or SSH:
 ```bash
 docker-compose up -d
 ```
@@ -67,70 +74,93 @@ docker-compose up -d
 
 ## ⚙️ Configuration Guide
 
-### Step 1: Threadfin Setup
-1.  Open Threadfin Web UI: `http://<YOUR_NAS_IP>:34400`
-2.  **Settings** Tab:
-    - **Tuner Count**: Set to `10` (or more).
-    - **Stream Buffer**: Turn **ON** (Essential for Plex stability).
-    - **EPG Source**: Set to **`XEPG`** (Crucial! Otherwise mapping won't work).
-    - Save Settings.
-3.  **Playlist** (M3U) Tab:
-    - Click **New Playlist**.
-    - **Type**: `M3U`
-    - **Name**: `Twitch`
-    - **URL**: `http://twitch-plex-tuner:5000/playlist.m3u` (Use container name)
-    - **Tuner**: `10`
-    - Save. You should see "X Channels".
-4.  **XMLTV** Tab:
-    - Click **New XMLTV File**.
-    - **Source**: `HTTP`
-    - **URL**: `http://twitch-plex-tuner:5000/epg.xml`
-    - Save. You should see "X Programs".
-5.  **Mapping** Tab:
-    - Verify channels are listed. If names are missing, click the channel and manually assign the XMLTV ID.
-    - *Note: Our recent fix ensures programs start 1 hour in the past so they appear "Live" immediately.*
+### Threadfin Setup
+1. Open Threadfin: `http://<NAS_IP>:34400`
+2. **Settings**:
+   - Tuner Count: `10`
+   - **Buffer**: `4 MB` (important for DS216+)
+   - **Timeout**: `5000ms`
+   - EPG Source: `XEPG`
+3. **Playlist**: 
+   - URL: `http://twitch-plex-tuner:5000/playlist.m3u`
+4. **XMLTV**:
+   - URL: `http://twitch-plex-tuner:5000/epg.xml`
 
-### Step 2: Plex Setup
-1.  Open Plex -> **Settings** (Wrench icon) -> **Live TV & DVR**.
-2.  Click **Add DVR**.
-3.  Do NOT select the discovered devices automatically (they might be the raw tuner).
-4.  Click **"Enter its network address manually"**.
-5.  Enter: `http://<YOUR_NAS_IP>:34400` (Threadfin's address).
-6.  Click **Connect**.
-7.  **Channel Mapping**:
-    - Plex should see the channels.
-    - Click **Continue**.
-    - For "Guide Data", select **"XMLTV Guide"**.
-    - Enter the XMLTV URL: `http://<YOUR_NAS_IP>:34400/xmltv.xml` (Threadfin generates this aggregated XML).
-    - *Alternatively, you can re-use the tuner URL, but Threadfin's is often safer.*
-8.  Complete the wizard.
+### Plex Setup
+1. Settings → Live TV & DVR → Add DVR
+2. Enter: `http://<NAS_IP>:34400` (Threadfin)
+3. For guide: `http://<NAS_IP>:34400/xmltv.xml`
 
-### Step 3: View Stream
-1.  Go to Plex **Live TV** section on the sidebar.
-2.  You should see the "Guide" with your Twitch channels.
-3.  Click a channel to play.
-    - **Note**: If the channel is OFFLINE on Twitch, playback will fail (or show an error, depending on Plex client).
-    - If the channel is LIVE, it should buffer briefly (Threadfin) and then play.
+---
+
+## 🔄 Synology Rebuild Workflow
+
+**Problem**: Container Manager doesn't properly rebuild images.
+
+**Solution**: SSH into NAS and use `rebuild.sh`:
+
+```bash
+cd /volume1/docker/twitch-plex-tuner
+
+# Normal rebuild (preserves Threadfin config)
+./scripts/rebuild.sh
+
+# Full reset (clears Threadfin too)
+./scripts/rebuild.sh --clean
+```
+
+**Manual Commands**:
+| Action | Command |
+|--------|---------|
+| View logs | `docker-compose logs -f tpt` |
+| Restart tuner | `docker-compose restart tpt` |
+| Force pull | `docker-compose pull` |
+| Rebuild one service | `docker-compose build --no-cache tpt` |
+
+---
+
+## 📹 Recording (No Plex Pass Needed)
+
+When `RECORDING_PATH` is set, the tuner automatically records live streams:
+
+- Checks for live channels every 2 minutes
+- Saves to: `{RECORDING_PATH}/{DisplayName}/{timestamp} - {title}.ts`
+- Stops recording when stream ends
+- Files organized by streamer name
+
+**To disable recording**: Remove the `RECORDING_PATH` environment variable.
+
+**To change quality**: Set `STREAM_QUALITY=720p60,720p,best` (lower for NAS storage).
+
+---
+
+## 🛠️ Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLIENT_ID` | required | Twitch API Client ID |
+| `CLIENT_SECRET` | required | Twitch API Client Secret |
+| `BASE_URL` | `http://localhost:5000` | Public URL for M3U/XMLTV |
+| `STREAM_QUALITY` | `1080p60,1080p,720p60,720p,best` | Quality preference |
+| `RECORDING_PATH` | *(disabled)* | Path to save recordings |
+| `GUIDE_UPDATE_MINUTES` | `10` | How often to refresh stream status |
 
 ---
 
 ## 🩺 Troubleshooting
 
-### "Playback Error" in Plex
-- **Cause**: Channel might be offline.
-- **Fix**: Check `twitch-plex-tuner` logs to see if `streamlink` found a stream.
-- **Fix**: Ensure "Stream Buffer" is ON in Threadfin. Docker networking can be flaky without it.
+### Stream won't play
+1. Check if channel is actually live on Twitch
+2. View logs: `docker-compose logs -f tpt`
+3. Ensure Threadfin buffer is ON
 
-### "No Channels" in Threadfin
-- **Cause**: Tuner container not reachable.
-- **Fix**: Ensure both services are in the same `compose.yaml` (bridge network).
-- **Check**: Run `curl http://twitch-plex-tuner:5000/playlist.m3u` from *inside* the Threadfin container.
+### "Building" doesn't update image
+Use `./scripts/rebuild.sh` instead of Container Manager UI.
 
-### "Guide is Empty" in Plex
-- **Cause**: XMLTV start times are in the future (fixed) OR Threadfin hasn't enabled the channels (Common!).
-- **Check (Threadfin)**: Go to **Filter** tab.
-    - Are your channels listed?
-    - **CRITICAL**: Do they have a **Green Sidebar** (Active)?
-    - If not, click the channel and ensure "Active" is checked (or use Bulk Edit -> Active).
-- **Check (Output)**: Output URL MUST be `http://<NAS_IP>:34400/xmltv.xml`. Any other URL (like `/` or `/device.xml`) serves UPnP data.
-- **Fix**: Force refresh Guide Data in Plex Settings.
+### Recording not working
+1. Verify `RECORDING_PATH` is set and mounted
+2. Check volume permissions (PUID/PGID)
+3. View logs for recording errors
+
+### Guide shows wrong status
+Guide updates every 10 minutes. For fastest updates, manually refresh in Plex: Settings → Live TV → Refresh Guide.
