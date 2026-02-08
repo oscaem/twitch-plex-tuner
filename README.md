@@ -71,6 +71,15 @@ services:
       - /path/to/your/subscriptions.yaml:/config/subscriptions.yaml
     ports:
       - "5200:5000"
+
+  threadfin:
+    image: fyb3roptik/threadfin:latest
+    container_name: threadfin
+    restart: always
+    ports:
+      - "34400:34400"
+    volumes:
+      - ./threadfin/conf:/home/threadfin/conf
 ```
 
 ### 2. Run
