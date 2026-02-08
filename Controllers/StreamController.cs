@@ -52,6 +52,13 @@ public class StreamController : ControllerBase
 
             Response.ContentType = "video/mp2t"; // MPEG-TS is best for Plex
             Response.Headers["Cache-Control"] = "no-cache";
+            
+            // Disable response buffering to ensure valid "low latency" streaming
+            var responseBodyFeature = HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
+            if (responseBodyFeature != null)
+            {
+                responseBodyFeature.DisableBuffering();
+            }
 
             await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, HttpContext.RequestAborted);
         }
