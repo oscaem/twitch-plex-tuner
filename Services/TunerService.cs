@@ -72,14 +72,21 @@ public class TunerService
                 new XElement("icon", new XAttribute("src", c.ProfileImageUrl)));
             doc.Root!.Add(channelElem);
 
-            // Generate a 24-hour program schedule showing channel as potentially live
+            // Use live data if available, otherwise generic
+            var title = c.IsLive ? c.StreamTitle : $"{c.DisplayName} is Offline";
+            var desc = c.IsLive ? $"Playing {c.GameName}" : "Channel is currently offline";
+            var category = c.IsLive ? c.GameName : "Offline";
+            var icon = c.IsLive && !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
+
             var prog = new XElement("programme",
                 new XAttribute("start", DateTime.UtcNow.AddHours(-1).ToString("yyyyMMddHHmmss +0000")),
                 new XAttribute("stop", DateTime.UtcNow.AddHours(24).ToString("yyyyMMddHHmmss +0000")),
                 new XAttribute("channel", c.Login),
-                new XElement("title", $"{c.DisplayName} on Twitch"),
-                new XElement("desc", "Live stream from Twitch"),
-                new XElement("category", "Gaming"));
+                new XElement("title", title),
+                new XElement("desc", desc),
+                new XElement("category", category),
+                new XElement("icon", new XAttribute("src", icon)));
+            
             doc.Root!.Add(prog);
         }
 

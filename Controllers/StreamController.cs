@@ -20,32 +20,9 @@ public class StreamController : ControllerBase
 
         var url = $"twitch.tv/{login}";
 
-        // 1. Check if live using streamlink (simpler than API for now)
-        // This avoids starting a full stream process if offline
-        // Note: In a production env, caching this status would be better
-        var checkProcess = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "streamlink",
-                Arguments = $"{url} best --stream-url", // This just gets the URL, doesn't stream
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        checkProcess.Start();
-        await checkProcess.WaitForExitAsync();
-
-        if (checkProcess.ExitCode != 0)
-        {
-            var error = await checkProcess.StandardError.ReadToEndAsync();
-            _logger.LogWarning("Streamlink check failed for {Login}: {Error}", login, error);
-            Response.StatusCode = 404; // Not Found (or offline)
-            return;
-        }
+        // 1. Direct Stream Launch (Optimized for speed)
+        // We skp the pre-check because it adds 2s latency which causes Plex to timeout.
+        // If the stream is offline, the main process below will exit immediately and return 500.
 
         // 2. Start actual stream
         var processStartInfo = new ProcessStartInfo

@@ -29,6 +29,7 @@ public class TwitchStream
     public string GameName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
+    public string ThumbnailUrl { get; set; } = string.Empty;
     public DateTime StartedAt { get; set; }
 }
 
@@ -42,4 +43,9 @@ public class ChannelInfo
     public string Login { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string ProfileImageUrl { get; set; } = string.Empty;
+    public bool IsLive { get; set; }
+    public string StreamTitle { get; set; } = string.Empty;
+    public string GameName { get; set; } = string.Empty;
+    public string StreamThumbnailUrl { get; set; } = string.Empty;
+    public DateTime? StartedAt { get; set; }
 }
