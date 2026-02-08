@@ -164,3 +164,13 @@ Use `./scripts/rebuild.sh` instead of Container Manager UI.
 
 ### Guide shows wrong status
 Guide updates every 10 minutes. For fastest updates, manually refresh in Plex: Settings → Live TV → Refresh Guide.
+
+---
+
+## 🙏 Acknowledgements
+
+This project is heavily inspired by and based on the excellent work of **twitch2tuner**.
+- Original Project: [twitch2tuner](https://github.com/micahmo/twitch2tuner) by micahmo
+- License: MIT
+
+We have extended the original concept with `.NET 10`, `yt-dlp` stability improvements, and enhanced recording capabilities.
