@@ -25,10 +25,32 @@ public class TunerController : ControllerBase
     public IActionResult Lineup() => Ok(_tunerService.GetLineup());
 
     [HttpGet("playlist.m3u")]
-    public IActionResult Playlist() => Content(_tunerService.GetM3U(), "text/plain");
+    public IActionResult Playlist()
+    {
+        try
+        {
+            return Content(_tunerService.GetM3U(), "text/plain");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error generating M3U: {ex}");
+            return StatusCode(500, ex.Message);
+        }
+    }
 
     [HttpGet("epg.xml")]
-    public IActionResult Epg() => Content(_tunerService.GetXMLTV(), "text/xml");
+    public IActionResult Epg()
+    {
+        try
+        {
+            return Content(_tunerService.GetXMLTV(), "text/xml");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error generating XMLTV: {ex}");
+            return StatusCode(500, ex.Message);
+        }
+    }
 
     [HttpGet("update")]
     public async Task<IActionResult> Update()
