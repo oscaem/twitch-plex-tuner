@@ -15,6 +15,7 @@ public class RecordingService : BackgroundService
     private readonly TwitchService _twitchService;
     private readonly ILogger<RecordingService> _logger;
     private readonly string _recordingPath;
+    private readonly int _retentionDays;
     
     // Track active recordings to avoid duplicates
     private static readonly ConcurrentDictionary<string, Process> _activeRecordings = new();
@@ -24,6 +25,11 @@ public class RecordingService : BackgroundService
         _twitchService = twitchService;
         _logger = logger;
         _recordingPath = Environment.GetEnvironmentVariable("RECORDING_PATH") ?? string.Empty;
+        
+        if (!int.TryParse(Environment.GetEnvironmentVariable("RECORDING_RETENTION_DAYS"), out _retentionDays))
+        {
+            _retentionDays = 30; // Default to 30 days
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,12 +40,21 @@ public class RecordingService : BackgroundService
             return;
         }
 
-        _logger.LogInformation("Recording service started. Output: {Path}", _recordingPath);
+        _logger.LogInformation("Recording service started. Output: {Path}, Retention: {Days} days", _recordingPath, _retentionDays);
+
+        var lastCleanup = DateTime.MinValue;
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                // Run cleanup once per hour
+                if (DateTime.UtcNow - lastCleanup > TimeSpan.FromHours(1))
+                {
+                    CleanupOldRecordings();
+                    lastCleanup = DateTime.UtcNow;
+                }
+
                 await CheckAndRecordLiveStreamsAsync(stoppingToken);
             }
             catch (Exception ex)
@@ -123,19 +138,22 @@ public class RecordingService : BackgroundService
             var channelDir = Path.Combine(_recordingPath, SanitizeFilename(channel.DisplayName));
             Directory.CreateDirectory(channelDir);
 
-            // Generate filename with timestamp
+            // Generate filename with timestamp - use mp4 for Plex compatibility
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
             var title = SanitizeFilename(channel.StreamTitle);
             if (title.Length > 50) title = title[..50];
-            var filename = $"{timestamp} - {title}.ts";
+            var filename = $"{timestamp} - {title}.mp4";
             var outputPath = Path.Combine(channelDir, filename);
 
-            // Use streamlink for recording (more reliable for long recordings)
-            var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "best";
+            // Use yt-dlp for recording (better Plex compatibility + mp4 container)
+            // -f bestvideo*+bestaudio/best: best quality
+            // --merge-output-format mp4: ensure mp4 container
+            // --no-part: do not use .part files (Plex might ignore them, but we want the final file to be clean)
+            // Note: Docker image must have ffmpeg installed for merge logic
             var psi = new ProcessStartInfo
             {
-                FileName = "streamlink",
-                Arguments = $"twitch.tv/{channel.Login} {quality} -o \"{outputPath}\" --twitch-disable-ads --retry-streams 10 --retry-max 5",
+                FileName = "yt-dlp",
+                Arguments = $"--output \"{outputPath}\" --format \"bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best\" --merge-output-format mp4 --no-part --quiet --no-warnings \"twitch.tv/{channel.Login}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -163,6 +181,45 @@ public class RecordingService : BackgroundService
         {
             _logger.LogError(ex, "[{Login}] Failed to start recording", channel.Login);
             return null;
+        }
+    }
+
+    private void CleanupOldRecordings()
+    {
+        try
+        {
+            if (!Directory.Exists(_recordingPath)) return;
+
+            var cutoff = DateTime.Now.AddDays(-_retentionDays);
+            var files = Directory.GetFiles(_recordingPath, "*.*", SearchOption.AllDirectories);
+            var deletedCount = 0;
+
+            foreach (var file in files)
+            {
+                var fi = new FileInfo(file);
+                if (fi.CreationTime < cutoff)
+                {
+                    try
+                    {
+                        fi.Delete();
+                        deletedCount++;
+                        _logger.LogDebug("Deleted old recording: {Path}", file);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete old recording: {Path}", file);
+                    }
+                }
+            }
+
+            if (deletedCount > 0)
+            {
+                _logger.LogInformation("Cleanup completed. Deleted {Count} old recordings.", deletedCount);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during recording cleanup");
         }
     }
 
