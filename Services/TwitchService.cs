@@ -74,7 +74,7 @@ public class TwitchService
                         })
                         .ReceiveJson<TwitchTokenResponse>();
 
-                    string accessToken = tokenResp.access_token;
+                    string accessToken = tokenResp.AccessToken;
                     
                     // Split into chunks of 100 (API limit)
                     var chunks = newChannels.Select((x, i) => new { Index = i, Value = x })
@@ -105,7 +105,12 @@ public class TwitchService
                             .WithHeader("Authorization", $"Bearer {accessToken}")
                             .SetQueryParam("user_login", userLogins);
 
+                        _logger.LogInformation("Requesting Streams: {Url}", streamsReq.Url);
+
                         var streamsResp = await streamsReq.GetJsonAsync<TwitchResponse<TwitchStream>>();
+                        
+                        _logger.LogInformation("Received {Count} streams from API for chunk of {ChunkSize}", streamsResp.Data.Count, chunk.Count);
+
                         foreach(var stream in streamsResp.Data)
                         {
                             var ch = chunk.FirstOrDefault(c => c.Login.Equals(stream.UserLogin, StringComparison.OrdinalIgnoreCase));
@@ -116,6 +121,11 @@ public class TwitchService
                                 ch.GameName = stream.GameName;
                                 ch.StartedAt = stream.StartedAt;
                                 ch.StreamThumbnailUrl = stream.ThumbnailUrl.Replace("{width}", "640").Replace("{height}", "360");
+                                _logger.LogInformation("Marking {Login} as LIVE: {Title}", ch.Login, ch.StreamTitle);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Stream found for {Login} but no matching channel in chunk", stream.UserLogin);
                             }
                         }
                     }
