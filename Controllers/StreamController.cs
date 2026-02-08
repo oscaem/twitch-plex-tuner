@@ -21,13 +21,14 @@ public class StreamController : ControllerBase
 
         var url = $"twitch.tv/{login}";
 
-        // 2. Start actual stream
+        // Start streamlink
+        // Note: specifying 720p60,720p,best can sometimes speed up the selection process
         var processStartInfo = new ProcessStartInfo
         {
             FileName = "streamlink",
-            Arguments = $"{url} best --stdout --quiet --twitch-disable-ads --twitch-low-latency --hls-live-edge 1 --stream-segment-threads 3",
+            Arguments = $"{url} best --stdout --quiet --twitch-disable-ads --twitch-low-latency --twitch-disable-hosting --twitch-disable-reruns --hls-live-edge 1 --stream-segment-threads 2",
             RedirectStandardOutput = true,
-            RedirectStandardError = true, // Capture error
+            RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
@@ -39,14 +40,16 @@ public class StreamController : ControllerBase
             process.Start();
 
             var stdout = process.StandardOutput.BaseStream;
-            var buffer = new byte[65536]; // Read 64KB to prime FFmpeg/Threadfin instantly
+            var initialBuffer = new byte[1]; 
             
-            _logger.LogDebug("[{Login}] Waiting for streamlink data...", login);
-            int bytesRead = await stdout.ReadAsync(buffer, 0, buffer.Length, HttpContext.RequestAborted);
-            _logger.LogInformation("[{Login}] Received {Bytes} bytes in {Elapsed}ms", login, bytesRead, sw.ElapsedMilliseconds);
+            // Wait for exactly ONE byte to prove the stream is valid
+            // 64KB was taking 5 seconds to fill, which is too slow for Plex.
+            int bytesRead = await stdout.ReadAsync(initialBuffer, 0, 1, HttpContext.RequestAborted);
             
             if (bytesRead <= 0)
             {
+                // Give it a tiny bit of time to exit so we can catch the error message
+                await Task.Delay(500);
                 if (process.HasExited && process.ExitCode != 0)
                 {
                     var error = await process.StandardError.ReadToEndAsync();
@@ -61,7 +64,9 @@ public class StreamController : ControllerBase
                 return;
             }
 
-            Response.ContentType = "video/mp2t"; // MPEG-TS is best for Plex
+            _logger.LogInformation("[{Login}] First byte received in {Elapsed}ms. Starting stream.", login, sw.ElapsedMilliseconds);
+
+            Response.ContentType = "video/mp2t"; 
             Response.Headers["Cache-Control"] = "no-cache";
             
             var responseBodyFeature = HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
@@ -70,11 +75,10 @@ public class StreamController : ControllerBase
                 responseBodyFeature.DisableBuffering();
             }
 
-            // Write the first chunk we already read
-            await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), HttpContext.RequestAborted);
-            _logger.LogInformation("[{Login}] Headers and first chunk sent. Total startup: {Elapsed}ms", login, sw.ElapsedMilliseconds);
+            // Write that first byte
+            await Response.Body.WriteAsync(initialBuffer.AsMemory(0, 1), HttpContext.RequestAborted);
             
-            // Continue streaming
+            // Continue streaming everything else
             await stdout.CopyToAsync(Response.Body, HttpContext.RequestAborted);
         }
         catch (OperationCanceledException)
