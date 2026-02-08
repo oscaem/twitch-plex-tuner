@@ -1,0 +1,6 @@
+@TwitchPlexTuner_HostAddress = http://localhost:5010
+
+GET {{TwitchPlexTuner_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

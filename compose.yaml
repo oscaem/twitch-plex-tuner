@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  tpt:
+    build: .
+    container_name: twitch-plex-tuner
+    restart: always
+    environment:
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - BASE_URL=http://${DOCKER_HOST_IP}:5000
+    volumes:
+      - ${SUBSCRIPTIONS_PATH}:/config/subscriptions.yaml
+    ports:
+      - "5000:5000"
+
+  threadfin:
+    image: fuzzymistborn/threadfin:latest
+    container_name: threadfin
+    restart: always
+    ports:
+      - "34400:34400"
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./threadfin/conf:/home/threadfin/conf
