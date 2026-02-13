@@ -24,7 +24,7 @@ public class StreamController : ControllerBase
     [HttpGet("stream/{login}")]
     public async Task GetStream(string login)
     {
-        _logger.LogInformation("[{Login}] Stream request received", login);
+        _logger.LogInformation("[{Login}] Stream request received. Engine: {Engine}", login, _config.StreamEngine);
         var sw = Stopwatch.StartNew();
 
         try
@@ -40,19 +40,25 @@ public class StreamController : ControllerBase
             
             await Response.Body.FlushAsync(HttpContext.RequestAborted);
 
-            // 2. Get or discover stream URL
-            string streamUrl = await GetStreamUrlAsync(login, HttpContext.RequestAborted);
-            
-            if (string.IsNullOrEmpty(streamUrl))
+            if (_config.StreamEngine.Equals("yt-dlp", StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("[{Login}] No stream URL found - channel may be offline", login);
-                return;
+                 // 2a. Legacy yt-dlp path
+                string streamUrl = await GetStreamUrlAsync(login, HttpContext.RequestAborted);
+                
+                if (string.IsNullOrEmpty(streamUrl))
+                {
+                    _logger.LogWarning("[{Login}] No stream URL found - channel may be offline", login);
+                    return;
+                }
+
+                _logger.LogInformation("[{Login}] URL obtained in {Elapsed}ms, starting yt-dlp stream", login, sw.ElapsedMilliseconds);
+                await StreamWithYtDlpAsync(login, streamUrl, HttpContext.RequestAborted);
             }
-
-            _logger.LogInformation("[{Login}] URL obtained in {Elapsed}ms, starting stream", login, sw.ElapsedMilliseconds);
-
-            // 3. Stream using yt-dlp (more stable than streamlink stdout for Plex)
-            await StreamWithYtDlpAsync(login, streamUrl, HttpContext.RequestAborted);
+            else
+            {
+                // 2b. Default Streamlink path (better ad handling)
+                await StreamWithStreamlinkAsync(login, HttpContext.RequestAborted);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -65,6 +71,67 @@ public class StreamController : ControllerBase
             {
                 Response.StatusCode = 500;
             }
+        }
+    }
+
+    private async Task StreamWithStreamlinkAsync(string login, CancellationToken ct)
+    {
+        var url = $"twitch.tv/{login}";
+        var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "1080p60,1080p,720p60,720p,best";
+        
+        var psi = new ProcessStartInfo
+        {
+            FileName = "streamlink",
+            Arguments = $"--twitch-disable-ads --twitch-low-latency --stdout \"{url}\" {quality}",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = new Process { StartInfo = psi };
+        
+        try
+        {
+            process.Start();
+            
+            // Log stderr in background
+            _ = Task.Run(async () =>
+            {
+                var stderr = await process.StandardError.ReadToEndAsync();
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    // Streamlink is chatty, so maybe only log if it looks like an error or debug enabled
+                    _logger.LogDebug("[{Login}] Streamlink stderr: {Stderr}", login, stderr.Trim());
+                }
+            }, CancellationToken.None);
+
+            // Stream buffer
+            var buffer = new byte[65536];
+            var stdout = process.StandardOutput.BaseStream;
+            
+            int bytesRead;
+            long totalBytes = 0;
+            
+            while ((bytesRead = await stdout.ReadAsync(buffer, ct)) > 0)
+            {
+                await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                totalBytes += bytesRead;
+            }
+
+            _logger.LogInformation("[{Login}] Streamlink stream ended normally, sent {TotalMB:F2}MB", login, totalBytes / 1024.0 / 1024.0);
+        }
+        finally
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(true);
+                    await process.WaitForExitAsync(CancellationToken.None);
+                }
+            }
+            catch { /* Process cleanup */ }
         }
     }
 

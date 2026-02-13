@@ -15,6 +15,7 @@ services:
       - RECORDING_RETENTION_DAYS=14
       - GUIDE_UPDATE_MINUTES=5
       - THREADFIN_URL=http://threadfin:34400 # URL to force update Threadfin
+      - STREAM_ENGINE=streamlink # Options: streamlink, yt-dlp
     volumes:
       - ${SUBSCRIPTIONS_PATH:-./subscriptions.yaml}:/config/subscriptions.yaml:ro
       - ${RECORDING_PATH:-./recordings}:/recordings
