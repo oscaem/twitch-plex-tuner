@@ -18,8 +18,8 @@ public class TunerController : ControllerBase
     [HttpGet("discover.json")]
     public IActionResult Discover()
     {
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        return Ok(_tunerService.GetDiscover(baseUrl));
+        // Use configured BaseUrl if set, otherwise fallback to request host
+        return Ok(_tunerService.GetDiscover());
     }
 
     [HttpGet("lineup_status.json")]
@@ -28,8 +28,7 @@ public class TunerController : ControllerBase
     [HttpGet("lineup.json")]
     public IActionResult Lineup()
     {
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        return Ok(_tunerService.GetLineup(baseUrl));
+        return Ok(_tunerService.GetLineup());
     }
 
     [HttpGet("playlist.m3u")]

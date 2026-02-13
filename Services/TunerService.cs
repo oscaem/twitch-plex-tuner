@@ -30,7 +30,7 @@ public class TunerService
             FirmwareName = "tpt_firmware",
             FirmwareVersion = "20240101",
             TunerCount = 5,
-            DeviceID = "TPT12345",
+            DeviceID = "TN123456", // Must be 8 chars, seemingly valid for Plex
             DeviceAuth = "none",
             BaseURL = effectiveBaseUrl,
             LineupURL = $"{effectiveBaseUrl}/lineup.json"

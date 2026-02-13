@@ -8,7 +8,8 @@ services:
     environment:
       - CLIENT_ID=${CLIENT_ID}
       - CLIENT_SECRET=${CLIENT_SECRET}
-      - BASE_URL=http://twitch-plex-tuner:5000
+      # IMPORTANT: This must be reachable by Plex!
+      - BASE_URL=http://192.168.178.39:5200
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
       - STREAM_QUALITY=720p,720p60,1080p,1080p60,best
       - RECORDING_PATH=/recordings
