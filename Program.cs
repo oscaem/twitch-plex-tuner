@@ -10,6 +10,8 @@ builder.Services.Configure<TwitchConfig>(options =>
     options.ClientSecret = Environment.GetEnvironmentVariable("CLIENT_SECRET") ?? string.Empty;
     options.SubscriptionsPath = Environment.GetEnvironmentVariable("SUBSCRIPTIONS_PATH") ?? "/config/subscriptions.yaml";
     options.BaseUrl = Environment.GetEnvironmentVariable("BASE_URL") ?? "http://localhost:5000";
+    options.PlexServerUrl = Environment.GetEnvironmentVariable("PLEX_SERVER_URL") ?? string.Empty;
+    options.PlexToken = Environment.GetEnvironmentVariable("PLEX_TOKEN") ?? string.Empty;
 });
 
 // Add services
@@ -17,6 +19,8 @@ builder.Services.AddSingleton<TwitchService>();
 builder.Services.AddSingleton<TunerService>();
 builder.Services.AddHostedService<TwitchUpdateService>();
 builder.Services.AddHostedService<RecordingService>();
+builder.Services.AddHostedService<PlexService>();
+builder.Services.AddHttpClient();
 builder.Services.AddControllers();
 
 var app = builder.Build();

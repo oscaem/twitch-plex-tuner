@@ -11,6 +11,8 @@ public class TwitchConfig
     public string ClientSecret { get; set; } = string.Empty;
     public string SubscriptionsPath { get; set; } = "/config/subscriptions.yaml";
     public string BaseUrl { get; set; } = "http://localhost:5000";
+    public string PlexServerUrl { get; set; } = string.Empty;
+    public string PlexToken { get; set; } = string.Empty;
 }
 
 public class TwitchUser
