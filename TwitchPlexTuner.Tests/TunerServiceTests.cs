@@ -53,7 +53,7 @@ public class TunerServiceTests
         Assert.Equal("channel1", channels[0].Attribute("id")?.Value);
 
         var programmes = doc.Descendants("programme").ToList();
-        Assert.Equal(2, programmes.Count);
+        Assert.Equal(6, programmes.Count);
 
         // check start time is in the past to ensure "now" is covered
         var startStr = programmes[0].Attribute("start")?.Value; // format "yyyyMMddHHmmss +0000"

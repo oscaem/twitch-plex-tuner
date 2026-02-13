@@ -73,26 +73,61 @@ public class PlexService : BackgroundService
             foreach (var dvr in dvrs)
             {
                 var key = dvr.Attribute("key")?.Value;
-                if (!string.IsNullOrEmpty(key))
+                if (string.IsNullOrEmpty(key)) continue;
+
+                // 1. Force Threadfin to update its XEPG (Guide & Playlist)
+                if (!string.IsNullOrEmpty(_config.ThreadfinUrl))
                 {
-                    var refreshUrl = $"{_config.PlexServerUrl.TrimEnd('/')}/liverebell/dvrs/{key}/refreshGuide?X-Plex-Token={_config.PlexToken}";
-                    _logger.LogInformation($"Triggering Guide Refresh for DVR {key}...");
-                    
-                    var refreshResponse = await client.PostAsync(refreshUrl, null, cancellationToken);
-                    if (refreshResponse.IsSuccessStatusCode)
-                    {
-                        _logger.LogInformation($"Successfully refreshed guide for DVR {key}.");
-                    }
-                    else
-                    {
-                        _logger.LogError($"Failed to refresh guide for DVR {key}. Status: {refreshResponse.StatusCode}");
-                    }
+                    await TriggerThreadfinUpdateAsync(client, cancellationToken);
+                    // Wait a moment for Threadfin to process
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+
+                // 2. Trigger Plex Refresh
+                var refreshUrl = $"{_config.PlexServerUrl.TrimEnd('/')}/liverebell/dvrs/{key}/refreshGuide?X-Plex-Token={_config.PlexToken}";
+                _logger.LogInformation($"Triggering Guide Refresh for DVR {key}...");
+                
+                var refreshResponse = await client.PostAsync(refreshUrl, null, cancellationToken);
+                if (refreshResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation($"Successfully refreshed guide for DVR {key}.");
+                }
+                else
+                {
+                    _logger.LogError($"Failed to refresh guide for DVR {key}. Status: {refreshResponse.StatusCode}");
                 }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to parse Plex DVR response or refresh guide.");
+        }
+    }
+
+    private async Task TriggerThreadfinUpdateAsync(HttpClient client, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"{_config.ThreadfinUrl.TrimEnd('/')}/api/";
+            _logger.LogInformation("Triggering Threadfin XEPG update at {Url}...", url);
+            
+            // Threadfin expects: {"cmd":"update.xepg"}
+            var json = JsonSerializer.Serialize(new { cmd = "update.xepg" });
+            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+            var response = await client.PostAsync(url, content, ct);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Threadfin update triggered successfully.");
+            }
+            else
+            {
+                _logger.LogWarning("Threadfin update failed. Status: {Status}", response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error triggering Threadfin update");
         }
     }
 }

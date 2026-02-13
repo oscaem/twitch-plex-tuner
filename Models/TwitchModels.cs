@@ -13,6 +13,7 @@ public class TwitchConfig
     public string BaseUrl { get; set; } = "http://localhost:5000";
     public string PlexServerUrl { get; set; } = string.Empty;
     public string PlexToken { get; set; } = string.Empty;
+    public string ThreadfinUrl { get; set; } = string.Empty;
 }
 
 public class TwitchUser

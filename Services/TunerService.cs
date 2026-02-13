@@ -76,23 +76,46 @@ public class TunerService
             doc.Root!.Add(channelElem);
 
             // Use live data if available, otherwise generic
-            var title = c.IsLive ? c.StreamTitle : $"{c.DisplayName} is Offline";
-            var desc = c.IsLive ? $"Playing {c.GameName}" : "Channel is currently offline";
-            var category = c.IsLive ? c.GameName : "Offline";
-            var icon = c.IsLive && !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
+            // 1. Past Block (Keep history for buffer)
+            var startPast = DateTime.UtcNow.AddHours(-1);
+            var endPast = DateTime.UtcNow;
+            
+            doc.Root!.Add(CreateProgramme(c, startPast, endPast, 
+                c.IsLive ? c.StreamTitle : "Offline", 
+                "Catch up", "Offline", c.ProfileImageUrl));
 
-            var prog = new XElement("programme",
-                new XAttribute("start", DateTime.UtcNow.AddHours(-1).ToString("yyyyMMddHHmmss +0000")),
-                new XAttribute("stop", DateTime.UtcNow.AddHours(24).ToString("yyyyMMddHHmmss +0000")),
+            // 2. Current Block (30 mins - Force updates to affect this slot)
+            var startCurrent = DateTime.UtcNow;
+            var endCurrent = DateTime.UtcNow.AddMinutes(30);
+            
+            var currentTitle = c.IsLive ? c.StreamTitle : $"{c.DisplayName} is Offline";
+            var currentDesc = c.IsLive ? $"Playing {c.GameName}" : "Channel is currently offline";
+            var currentCat = c.IsLive ? c.GameName : "Offline";
+            var currentIcon = c.IsLive && !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
+
+            doc.Root!.Add(CreateProgramme(c, startCurrent, endCurrent, currentTitle, currentDesc, currentCat, currentIcon));
+
+            // 3. Future Block (Placeholder rest of day)
+            var startFuture = endCurrent;
+            var endFuture = DateTime.UtcNow.AddHours(24);
+            
+            doc.Root!.Add(CreateProgramme(c, startFuture, endFuture, 
+                $"{c.DisplayName} Offline", 
+                "Future programming", "Offline", c.ProfileImageUrl));
+        }
+
+        return new XDeclaration("1.0", "utf-8", null) + Environment.NewLine + doc.ToString();
+    }
+
+    private XElement CreateProgramme(ChannelInfo c, DateTime start, DateTime end, string title, string desc, string category, string iconUrl)
+    {
+        return new XElement("programme",
+                new XAttribute("start", start.ToString("yyyyMMddHHmmss +0000")),
+                new XAttribute("stop", end.ToString("yyyyMMddHHmmss +0000")),
                 new XAttribute("channel", c.Login),
                 new XElement("title", title),
                 new XElement("desc", desc),
                 new XElement("category", category),
-                new XElement("icon", new XAttribute("src", icon)));
-            
-            doc.Root!.Add(prog);
-        }
-
-        return new XDeclaration("1.0", "utf-8", null) + Environment.NewLine + doc.ToString();
+                new XElement("icon", new XAttribute("src", iconUrl)));
     }
 }

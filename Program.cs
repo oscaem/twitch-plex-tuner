@@ -12,6 +12,7 @@ builder.Services.Configure<TwitchConfig>(options =>
     options.BaseUrl = Environment.GetEnvironmentVariable("BASE_URL") ?? "http://localhost:5000";
     options.PlexServerUrl = Environment.GetEnvironmentVariable("PLEX_SERVER_URL") ?? string.Empty;
     options.PlexToken = Environment.GetEnvironmentVariable("PLEX_TOKEN") ?? string.Empty;
+    options.ThreadfinUrl = Environment.GetEnvironmentVariable("THREADFIN_URL") ?? string.Empty;
 });
 
 // Add services

@@ -138,12 +138,18 @@ public class RecordingService : BackgroundService
             var channelDir = Path.Combine(_recordingPath, SanitizeFilename(channel.DisplayName));
             Directory.CreateDirectory(channelDir);
 
-            // Generate filename with timestamp - use mp4 for Plex compatibility
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            // Generate filename: {Channel} - {Date} - {Title}.mp4
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm");
             var title = SanitizeFilename(channel.StreamTitle);
             if (title.Length > 50) title = title[..50];
-            var filename = $"{timestamp} - {title}.mp4";
+            
+            var filename = $"{channel.DisplayName} - {timestamp} - {title}.mp4";
             var outputPath = Path.Combine(channelDir, filename);
+
+            // Use yt-dlp for recording
+            // We adding --exec to run chmod after download? No, that's complex.
+            // We will just run chmod in C# after process starts? No, file isn't there yet.
+            // We will do it after process exits? Yes.
 
             // Use yt-dlp for recording (better Plex compatibility + mp4 container)
             // -f bestvideo*+bestaudio/best: best quality
@@ -153,7 +159,7 @@ public class RecordingService : BackgroundService
             var psi = new ProcessStartInfo
             {
                 FileName = "yt-dlp",
-                Arguments = $"--output \"{outputPath}\" --format \"bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best\" --merge-output-format mp4 --no-part --quiet --no-warnings \"twitch.tv/{channel.Login}\"",
+                Arguments = $"--output \"{outputPath}\" --format \"bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best\" --merge-output-format mp4 --no-part --quiet --no-warnings --exec \"chmod 666 {{}}\" \"twitch.tv/{channel.Login}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
