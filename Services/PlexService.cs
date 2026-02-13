@@ -55,7 +55,7 @@ public class PlexService : BackgroundService
     private async Task RefreshPlexGuideAsync(CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient();
-        var devicesUrl = $"{_config.PlexServerUrl.TrimEnd('/')}/liverebell/dvrs?X-Plex-Token={_config.PlexToken}";
+        var devicesUrl = $"{_config.PlexServerUrl.TrimEnd('/')}/livetv/dvrs?X-Plex-Token={_config.PlexToken}";
 
         try
         {
@@ -91,7 +91,7 @@ public class PlexService : BackgroundService
                 }
 
                 // 2. Trigger Plex Refresh
-                var refreshUrl = $"{_config.PlexServerUrl.TrimEnd('/')}/liverebell/dvrs/{key}/refreshGuide?X-Plex-Token={_config.PlexToken}";
+                var refreshUrl = $"{_config.PlexServerUrl.TrimEnd('/')}/livetv/dvrs/{key}/refreshGuide?X-Plex-Token={_config.PlexToken}";
                 _logger.LogInformation($"Triggering Guide Refresh for DVR {key}...");
                 
                 var refreshResponse = await client.PostAsync(refreshUrl, null, cancellationToken);
