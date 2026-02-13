@@ -14,6 +14,7 @@ builder.Services.Configure<TwitchConfig>(options =>
     options.PlexToken = Environment.GetEnvironmentVariable("PLEX_TOKEN") ?? string.Empty;
     options.ThreadfinUrl = Environment.GetEnvironmentVariable("THREADFIN_URL") ?? string.Empty;
     options.StreamEngine = Environment.GetEnvironmentVariable("STREAM_ENGINE") ?? "streamlink";
+    options.FFmpegArgs = Environment.GetEnvironmentVariable("FFMPEG_ARGS") ?? string.Empty;
 });
 
 // Add services

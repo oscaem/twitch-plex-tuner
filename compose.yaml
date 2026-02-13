@@ -10,12 +10,13 @@ services:
       - CLIENT_SECRET=${CLIENT_SECRET}
       - BASE_URL=http://twitch-plex-tuner:5000
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
-      - STREAM_QUALITY=1080p60,1080p,720p60,720p,best
+      - STREAM_QUALITY=720p,720p60,1080p,1080p60,best
       - RECORDING_PATH=/recordings
       - RECORDING_RETENTION_DAYS=14
       - GUIDE_UPDATE_MINUTES=5
-      - THREADFIN_URL=http://threadfin:34400 # URL to force update Threadfin
+      # - THREADFIN_URL=http://threadfin:34400 # URL to force update Threadfin
       - STREAM_ENGINE=streamlink # Options: streamlink, yt-dlp
+      # - FFMPEG_ARGS=-hide_banner -loglevel error -i pipe:0 -c:v copy -c:a libmp3lame -b:a 128k -f mpegts pipe:1
     volumes:
       - ${SUBSCRIPTIONS_PATH:-./subscriptions.yaml}:/config/subscriptions.yaml:ro
       - ${RECORDING_PATH:-./recordings}:/recordings
@@ -23,15 +24,15 @@ services:
       - "5200:5000"
 
   # Threadfin: Buffers streams and presents them to Plex
-  threadfin:
-    image: fyb3roptik/threadfin:latest
-    container_name: threadfin
-    restart: always
-    ports:
-      - "34400:34400"
-    environment:
-      - PUID=1000
-      - PGID=1000
-    volumes:
-      - ./threadfin/conf:/home/threadfin/conf
-      - ./threadfin/temp:/tmp/threadfin
+  # threadfin:
+  #   image: fyb3roptik/threadfin:latest
+  #   container_name: threadfin
+  #   restart: always
+  #   ports:
+  #     - "34400:34400"
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #   volumes:
+  #     - ./threadfin/conf:/home/threadfin/conf
+  #     - ./threadfin/temp:/tmp/threadfin

@@ -79,7 +79,7 @@ public class StreamController : ControllerBase
         var url = $"twitch.tv/{login}";
         var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "1080p60,1080p,720p60,720p,best";
         
-        var psi = new ProcessStartInfo
+        var slPsi = new ProcessStartInfo
         {
             FileName = "streamlink",
             Arguments = $"--twitch-disable-ads --twitch-low-latency --stdout \"{url}\" {quality}",
@@ -89,49 +89,100 @@ public class StreamController : ControllerBase
             CreateNoWindow = true
         };
 
-        using var process = new Process { StartInfo = psi };
-        
+        using var slProcess = new Process { StartInfo = slPsi };
+        Process? ffmpegProcess = null;
+
         try
         {
-            process.Start();
-            
-            // Log stderr in background
+            slProcess.Start();
+
+            // Background logging for streamlink stderr
             _ = Task.Run(async () =>
             {
-                var stderr = await process.StandardError.ReadToEndAsync();
+                var stderr = await slProcess.StandardError.ReadToEndAsync();
                 if (!string.IsNullOrWhiteSpace(stderr))
                 {
-                    // Streamlink is chatty, so maybe only log if it looks like an error or debug enabled
                     _logger.LogDebug("[{Login}] Streamlink stderr: {Stderr}", login, stderr.Trim());
                 }
             }, CancellationToken.None);
 
-            // Stream buffer
-            var buffer = new byte[65536];
-            var stdout = process.StandardOutput.BaseStream;
-            
+            Stream inputStream;
+
+            if (!string.IsNullOrEmpty(_config.FFmpegArgs))
+            {
+                // Chain: Streamlink -> FFmpeg -> Response
+                _logger.LogInformation("[{Login}] Starting FFmpeg pipeline with args: {Args}", login, _config.FFmpegArgs);
+
+                var ffmpegPsi = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    Arguments = _config.FFmpegArgs,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                ffmpegProcess = new Process { StartInfo = ffmpegPsi };
+                ffmpegProcess.Start();
+
+                // Log ffmpeg stderr
+                _ = Task.Run(async () =>
+                {
+                    var stderr = await ffmpegProcess.StandardError.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(stderr) && !stderr.Contains("frame="))
+                    {
+                        _logger.LogWarning("[{Login}] FFmpeg stderr: {Stderr}", login, stderr.Trim());
+                    }
+                }, CancellationToken.None);
+
+                // Pipe Streamlink -> FFmpeg
+                var slStdout = slProcess.StandardOutput.BaseStream;
+                var ffmpegStdin = ffmpegProcess.StandardInput.BaseStream;
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await slStdout.CopyToAsync(ffmpegStdin, ct);
+                        ffmpegStdin.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[{Login}] Error piping Streamlink -> FFmpeg", login);
+                    }
+                }, CancellationToken.None);
+
+                inputStream = ffmpegProcess.StandardOutput.BaseStream;
+            }
+            else
+            {
+                // Direct: Streamlink -> Response
+                inputStream = slProcess.StandardOutput.BaseStream;
+            }
+
+            // Pipe Input (FFmpeg or Streamlink) -> Response
+            var buffer = new byte[1024 * 1024]; // 1MB buffer
             int bytesRead;
             long totalBytes = 0;
-            
-            while ((bytesRead = await stdout.ReadAsync(buffer, ct)) > 0)
+
+            while ((bytesRead = await inputStream.ReadAsync(buffer, ct)) > 0)
             {
                 await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
                 totalBytes += bytesRead;
             }
 
-            _logger.LogInformation("[{Login}] Streamlink stream ended normally, sent {TotalMB:F2}MB", login, totalBytes / 1024.0 / 1024.0);
+            _logger.LogInformation("[{Login}] Stream ended normally, sent {TotalMB:F2}MB", login, totalBytes / 1024.0 / 1024.0);
         }
         finally
         {
             try
             {
-                if (!process.HasExited)
-                {
-                    process.Kill(true);
-                    await process.WaitForExitAsync(CancellationToken.None);
-                }
+                if (!slProcess.HasExited) { slProcess.Kill(true); await slProcess.WaitForExitAsync(CancellationToken.None); }
+                if (ffmpegProcess != null && !ffmpegProcess.HasExited) { ffmpegProcess.Kill(true); await ffmpegProcess.WaitForExitAsync(CancellationToken.None); }
             }
-            catch { /* Process cleanup */ }
+            catch { /* Cleanup */ }
         }
     }
 
@@ -214,8 +265,8 @@ public class StreamController : ControllerBase
                 }
             }, CancellationToken.None);
 
-            // Stream with larger buffer for DS216+ stability (64KB)
-            var buffer = new byte[65536];
+            // Stream with larger buffer for DS216+ stability (1MB)
+            var buffer = new byte[1024 * 1024];
             var stdout = process.StandardOutput.BaseStream;
             
             int bytesRead;

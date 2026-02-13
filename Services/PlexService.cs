@@ -75,12 +75,19 @@ public class PlexService : BackgroundService
                 var key = dvr.Attribute("key")?.Value;
                 if (string.IsNullOrEmpty(key)) continue;
 
-                // 1. Force Threadfin to update its XEPG (Guide & Playlist)
+                // 1. Force Threadfin to update its XEPG (Guide & Playlist) - OPTIONAL
                 if (!string.IsNullOrEmpty(_config.ThreadfinUrl))
                 {
-                    await TriggerThreadfinUpdateAsync(client, cancellationToken);
-                    // Wait a moment for Threadfin to process
-                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                    try
+                    {
+                        await TriggerThreadfinUpdateAsync(client, cancellationToken);
+                        // Wait a moment for Threadfin to process
+                        await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                         _logger.LogWarning(ex, "Failed to update Threadfin, continuing...");
+                    }
                 }
 
                 // 2. Trigger Plex Refresh
