@@ -75,33 +75,29 @@ public class TunerService
                 new XElement("icon", new XAttribute("src", c.ProfileImageUrl)));
             doc.Root!.Add(channelElem);
 
-            // Use live data if available, otherwise generic
-            // 1. Past Block (Keep history for buffer)
-            var startPast = DateTime.UtcNow.AddHours(-1);
-            var endPast = DateTime.UtcNow;
-            
-            doc.Root!.Add(CreateProgramme(c, startPast, endPast, 
-                c.IsLive ? c.StreamTitle : "Offline", 
-                "Catch up", "Offline", c.ProfileImageUrl));
+            // Single 24-hour sliding window
+            // This prevents "greyed out" future blocks and fragmentation in Plex.
+            var start = DateTime.UtcNow;
+            var end = DateTime.UtcNow.AddHours(24); // Show status for the next 24 hours
 
-            // 2. Current Block (30 mins - Force updates to affect this slot)
-            var startCurrent = DateTime.UtcNow;
-            var endCurrent = DateTime.UtcNow.AddMinutes(30);
-            
-            var currentTitle = c.IsLive ? c.StreamTitle : $"{c.DisplayName} is Offline";
-            var currentDesc = c.IsLive ? $"Playing {c.GameName}" : "Channel is currently offline";
-            var currentCat = c.IsLive ? c.GameName : "Offline";
-            var currentIcon = c.IsLive && !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
+            string title, desc, category, icon;
 
-            doc.Root!.Add(CreateProgramme(c, startCurrent, endCurrent, currentTitle, currentDesc, currentCat, currentIcon));
+            if (c.IsLive)
+            {
+                title = $"🟢 {c.StreamTitle}"; // Add status indicator to title
+                desc = $"Streaming {c.GameName}. Started at {c.StartedAt.GetValueOrDefault().ToLocalTime():HH:mm}.";
+                category = c.GameName;
+                icon = !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
+            }
+            else
+            {
+                title = $"{c.DisplayName} is Offline";
+                desc = "Channel is currently offline. Tune in later!";
+                category = "Offline";
+                icon = c.ProfileImageUrl;
+            }
 
-            // 3. Future Block (Placeholder rest of day)
-            var startFuture = endCurrent;
-            var endFuture = DateTime.UtcNow.AddHours(24);
-            
-            doc.Root!.Add(CreateProgramme(c, startFuture, endFuture, 
-                $"{c.DisplayName} Offline", 
-                "Future programming", "Offline", c.ProfileImageUrl));
+            doc.Root!.Add(CreateProgramme(c, start, end, title, desc, category, icon));
         }
 
         return new XDeclaration("1.0", "utf-8", null) + Environment.NewLine + doc.ToString();

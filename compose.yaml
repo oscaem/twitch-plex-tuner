@@ -17,7 +17,8 @@ services:
       - GUIDE_UPDATE_MINUTES=5
       # - THREADFIN_URL=http://threadfin:34400 # URL to force update Threadfin
       - STREAM_ENGINE=streamlink # Options: streamlink, yt-dlp
-      # - FFMPEG_ARGS=-hide_banner -loglevel error -i pipe:0 -c:v copy -c:a libmp3lame -b:a 128k -f mpegts pipe:1
+      # AAC is better for Plex compatibility. +genpts fixes timestamp issues.
+      - FFMPEG_ARGS=-hide_banner -loglevel error -fflags +genpts -i pipe:0 -c:v copy -c:a aac -b:a 128k -f mpegts pipe:1
     volumes:
       - ${SUBSCRIPTIONS_PATH:-./subscriptions.yaml}:/config/subscriptions.yaml:ro
       - ${RECORDING_PATH:-./recordings}:/recordings
