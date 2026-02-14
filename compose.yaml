@@ -16,9 +16,8 @@ services:
       - RECORDING_RETENTION_DAYS=14
       - GUIDE_UPDATE_MINUTES=5
       # - THREADFIN_URL=http://threadfin:34400 # URL to force update Threadfin
-      - STREAM_ENGINE=streamlink # Options: streamlink, yt-dlp
-      # AAC is better for Plex compatibility. +genpts fixes timestamp issues.
-      - FFMPEG_ARGS=-hide_banner -loglevel error -fflags +genpts -i pipe:0 -c:v copy -c:a aac -b:a 128k -f mpegts pipe:1
+      # AAC + AnnexB filter fixes "non-existing PPS" errors. Reduced analysis time for faster start.
+      - FFMPEG_ARGS=-hide_banner -loglevel error -fflags +genpts -analyzeduration 2000000 -probesize 2000000 -i pipe:0 -c:v copy -c:a aac -b:a 128k -bsf:v h264_mp4toannexb -f mpegts pipe:1
     volumes:
       - ${SUBSCRIPTIONS_PATH:-./subscriptions.yaml}:/config/subscriptions.yaml:ro
       - ${RECORDING_PATH:-./recordings}:/recordings

@@ -82,7 +82,8 @@ public class StreamController : ControllerBase
         var slPsi = new ProcessStartInfo
         {
             FileName = "streamlink",
-            Arguments = $"--twitch-disable-ads --twitch-low-latency --stdout \"{url}\" {quality}",
+            // Optimized for Stability on DS216+ (Prioritize buffer over latency)
+            Arguments = $"--twitch-disable-ads --hls-live-edge 6 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
