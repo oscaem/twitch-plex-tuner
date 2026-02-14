@@ -24,7 +24,12 @@ builder.Services.AddHostedService<TwitchUpdateService>();
 builder.Services.AddHostedService<RecordingService>();
 builder.Services.AddHostedService<PlexService>();
 builder.Services.AddHttpClient();
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Plex requires PascalCase (e.g. GuideName, GuideNumber) for HDHomeRun emulation
+        options.JsonSerializerOptions.PropertyNamingPolicy = null;
+    });
 
 var app = builder.Build();
 
