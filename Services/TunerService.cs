@@ -75,10 +75,9 @@ public class TunerService
                 new XElement("icon", new XAttribute("src", c.ProfileImageUrl)));
             doc.Root!.Add(channelElem);
 
-            // Single 24-hour sliding window
-            // This prevents "greyed out" future blocks and fragmentation in Plex.
-            var start = DateTime.UtcNow;
-            var end = DateTime.UtcNow.AddHours(24); // Show status for the next 24 hours
+            // Start 15 mins in the past to ensure Plex finds the "current" program.
+            var start = DateTime.UtcNow.AddMinutes(-15);
+            var end = start.AddHours(24); 
 
             string title, desc, category, icon;
 

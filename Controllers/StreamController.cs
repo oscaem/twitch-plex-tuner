@@ -78,12 +78,11 @@ public class StreamController : ControllerBase
     {
         var url = $"twitch.tv/{login}";
         var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "1080p60,1080p,720p60,720p,best";
-        
         var slPsi = new ProcessStartInfo
         {
             FileName = "streamlink",
-            // Optimized for Stability on DS216+ (Prioritize buffer over latency)
-            Arguments = $"--twitch-disable-ads --hls-live-edge 6 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
+            // Optimized for Stability: High thread count for segments, large ringbuffer.
+            Arguments = $"--twitch-disable-ads --hls-live-edge 6 --hls-segment-threads 3 --hls-segment-attempts 5 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -164,14 +163,14 @@ public class StreamController : ControllerBase
             }
 
             // Pipe Input (FFmpeg or Streamlink) -> Response
-            var buffer = new byte[256 * 1024]; // 256KB buffer for smoother heartbeat on weak CPUs
+            var buffer = new byte[128 * 1024]; // 128KB buffer: standard balance for Synology
             int bytesRead;
             long totalBytes = 0;
 
             while ((bytesRead = await inputStream.ReadAsync(buffer, ct)) > 0)
             {
                 await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-                await Response.Body.FlushAsync(ct); // Force immediate delivery
+                await Response.Body.FlushAsync(ct); 
                 totalBytes += bytesRead;
             }
 
