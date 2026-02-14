@@ -35,6 +35,17 @@ using (var scope = app.Services.CreateScope())
     await twitchService.UpdateChannelsAsync();
 }
 
+// Rewrite // to / to handle Plex's double-slash requests
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.Value?.Contains("//") == true)
+    {
+        var newPath = context.Request.Path.Value.Replace("//", "/");
+        context.Request.Path = newPath;
+    }
+    await next();
+});
+
 app.MapControllers();
 
 app.Run();
