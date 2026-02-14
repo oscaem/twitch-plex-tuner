@@ -164,13 +164,14 @@ public class StreamController : ControllerBase
             }
 
             // Pipe Input (FFmpeg or Streamlink) -> Response
-            var buffer = new byte[1024 * 1024]; // 1MB buffer
+            var buffer = new byte[256 * 1024]; // 256KB buffer for smoother heartbeat on weak CPUs
             int bytesRead;
             long totalBytes = 0;
 
             while ((bytesRead = await inputStream.ReadAsync(buffer, ct)) > 0)
             {
                 await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                await Response.Body.FlushAsync(ct); // Force immediate delivery
                 totalBytes += bytesRead;
             }
 
@@ -266,8 +267,8 @@ public class StreamController : ControllerBase
                 }
             }, CancellationToken.None);
 
-            // Stream with larger buffer for DS216+ stability (1MB)
-            var buffer = new byte[1024 * 1024];
+            // Stream with smaller more frequent buffer for DS216+ heartbeat (256KB)
+            var buffer = new byte[256 * 1024];
             var stdout = process.StandardOutput.BaseStream;
             
             int bytesRead;
@@ -276,6 +277,7 @@ public class StreamController : ControllerBase
             while ((bytesRead = await stdout.ReadAsync(buffer, ct)) > 0)
             {
                 await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                await Response.Body.FlushAsync(ct); // Force delivery
                 totalBytes += bytesRead;
             }
 
