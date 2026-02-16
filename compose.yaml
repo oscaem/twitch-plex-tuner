@@ -11,13 +11,13 @@ services:
       # IMPORTANT: This must be reachable by Plex!
       - BASE_URL=http://192.168.178.39:5200
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
-      - STREAM_QUALITY=720p,720p60,1080p,1080p60,best
+      - STREAM_QUALITY=720p,720p60,best
       - RECORDING_PATH=/recordings
       - RECORDING_RETENTION_DAYS=14
       - GUIDE_UPDATE_MINUTES=5
-      # - THREADFIN_URL=http://threadfin:34400 # URL to force update Threadfin
-      # Thread queue prevents drops. AAC + AnnexB fixes audio/crashes.
-      - FFMPEG_ARGS=-hide_banner -loglevel error -fflags +genpts -thread_queue_size 1024 -i pipe:0 -c:v copy -c:a aac -b:a 128k -bsf:v h264_mp4toannexb -max_interleave_delta 0 -flush_packets 1 -f mpegts pipe:1
+      - STREAM_ENGINE=yt-dlp
+      # Increased probesize/analyzeduration for fMP4 stability. explicitly force mpegts.
+      - FFMPEG_ARGS=-hide_banner -loglevel error -fflags +genpts+igndts+nobuffer+flush_packets -thread_queue_size 1024 -probesize 5M -analyzeduration 2M -i pipe:0 -map 0:v:0 -map 0:a:0 -c copy -bsf:v h264_mp4toannexb -f mpegts -mpegts_flags resend_headers pipe:1
     volumes:
       - ${SUBSCRIPTIONS_PATH:-./subscriptions.yaml}:/config/subscriptions.yaml:ro
       - ${RECORDING_PATH:-./recordings}:/recordings

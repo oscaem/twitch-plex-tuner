@@ -38,7 +38,7 @@ public class StreamController : ControllerBase
             var responseBodyFeature = HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
             responseBodyFeature?.DisableBuffering();
             
-            await Response.Body.FlushAsync(HttpContext.RequestAborted);
+            await Task.CompletedTask; // Headers are already set
 
             if (_config.StreamEngine.Equals("yt-dlp", StringComparison.OrdinalIgnoreCase))
             {
@@ -81,8 +81,8 @@ public class StreamController : ControllerBase
         var slPsi = new ProcessStartInfo
         {
             FileName = "streamlink",
-            // Optimized for Stability: High thread count for segments, large ringbuffer.
-            Arguments = $"--twitch-disable-ads --hls-live-edge 6 --hls-segment-threads 3 --hls-segment-attempts 5 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
+            // Start with only 1 segment (~2s buffer) for fastest startup to satisfy probers.
+            Arguments = $"--twitch-disable-ads --hls-live-edge 1 --hls-segment-threads 4 --hls-segment-attempts 5 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -163,7 +163,7 @@ public class StreamController : ControllerBase
             }
 
             // Pipe Input (FFmpeg or Streamlink) -> Response
-            var buffer = new byte[128 * 1024]; // 128KB buffer: standard balance for Synology
+            var buffer = new byte[128 * 1024]; // 128KB: Steady delivery for DS216+
             int bytesRead;
             long totalBytes = 0;
 
@@ -237,10 +237,10 @@ public class StreamController : ControllerBase
 
     private async Task StreamWithYtDlpAsync(string login, string streamUrl, CancellationToken ct)
     {
-        // yt-dlp is more stable than streamlink stdout for Plex
+        // yt-dlp is more stable than streamlink stdout for Plex/Jellyfin
         // -q: quiet, --no-warnings: suppress warnings
         // -o -: output to stdout
-        var psi = new ProcessStartInfo
+        var slPsi = new ProcessStartInfo
         {
             FileName = "yt-dlp",
             Arguments = $"-q --no-warnings \"{streamUrl}\" -o -",
@@ -250,33 +250,95 @@ public class StreamController : ControllerBase
             CreateNoWindow = true
         };
 
-        using var process = new Process { StartInfo = psi };
-        
+        using var slProcess = new Process { StartInfo = slPsi };
+        Process? ffmpegProcess = null;
+
         try
         {
-            process.Start();
-            
-            // Log any stderr in background
+            slProcess.Start();
+
+            // Background logging for yt-dlp stderr
             _ = Task.Run(async () =>
             {
-                var stderr = await process.StandardError.ReadToEndAsync();
+                var stderr = await slProcess.StandardError.ReadToEndAsync();
                 if (!string.IsNullOrWhiteSpace(stderr))
                 {
                     _logger.LogWarning("[{Login}] yt-dlp stderr: {Stderr}", login, stderr.Trim());
                 }
             }, CancellationToken.None);
 
-            // Stream with smaller more frequent buffer for DS216+ heartbeat (256KB)
-            var buffer = new byte[256 * 1024];
-            var stdout = process.StandardOutput.BaseStream;
-            
+            Stream inputStream;
+
+            if (!string.IsNullOrEmpty(_config.FFmpegArgs))
+            {
+                // Chain: yt-dlp -> FFmpeg -> Response
+                _logger.LogInformation("[{Login}] Starting FFmpeg pipeline with args: {Args}", login, _config.FFmpegArgs);
+
+                var ffmpegPsi = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    Arguments = _config.FFmpegArgs,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                ffmpegProcess = new Process { StartInfo = ffmpegPsi };
+                ffmpegProcess.Start();
+
+                // Log ffmpeg stderr
+                _ = Task.Run(async () =>
+                {
+                    var stderr = await ffmpegProcess.StandardError.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(stderr) && !stderr.Contains("frame="))
+                    {
+                        _logger.LogWarning("[{Login}] FFmpeg stderr: {Stderr}", login, stderr.Trim());
+                    }
+                }, CancellationToken.None);
+
+                // Pipe yt-dlp -> FFmpeg
+                var slStdout = slProcess.StandardOutput.BaseStream;
+                var ffmpegStdin = ffmpegProcess.StandardInput.BaseStream;
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await slStdout.CopyToAsync(ffmpegStdin, ct);
+                        ffmpegStdin.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[{Login}] Error piping yt-dlp -> FFmpeg", login);
+                    }
+                }, CancellationToken.None);
+
+                inputStream = ffmpegProcess.StandardOutput.BaseStream;
+            }
+            else
+            {
+                // Direct: yt-dlp -> Response
+                inputStream = slProcess.StandardOutput.BaseStream;
+            }
+
+            // Pipe Input (FFmpeg or yt-dlp) -> Response
+            var buffer = new byte[128 * 1024]; // 128KB: Steady delivery for DS216+
             int bytesRead;
             long totalBytes = 0;
-            
-            while ((bytesRead = await stdout.ReadAsync(buffer, ct)) > 0)
+            bool firstByteSent = false;
+
+            while ((bytesRead = await inputStream.ReadAsync(buffer, ct)) > 0)
             {
+                if (!firstByteSent)
+                {
+                    _logger.LogInformation("[{Login}] First {Bytes} bytes received from input stream. Delivering to client...", login, bytesRead);
+                    firstByteSent = true;
+                }
+
                 await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-                await Response.Body.FlushAsync(ct); // Force delivery
+                await Response.Body.FlushAsync(ct); 
                 totalBytes += bytesRead;
             }
 
@@ -289,13 +351,10 @@ public class StreamController : ControllerBase
         {
             try
             {
-                if (!process.HasExited)
-                {
-                    process.Kill(true);
-                    await process.WaitForExitAsync(CancellationToken.None);
-                }
+                if (!slProcess.HasExited) { slProcess.Kill(true); await slProcess.WaitForExitAsync(CancellationToken.None); }
+                if (ffmpegProcess != null && !ffmpegProcess.HasExited) { ffmpegProcess.Kill(true); await ffmpegProcess.WaitForExitAsync(CancellationToken.None); }
             }
-            catch { /* Process cleanup */ }
+            catch { /* Cleanup */ }
         }
     }
 
