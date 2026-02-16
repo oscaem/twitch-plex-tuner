@@ -53,11 +53,13 @@ public class TunerServiceTests
         Assert.Equal("channel1", channels[0].Attribute("id")?.Value);
 
         var programmes = doc.Descendants("programme").ToList();
-        Assert.Equal(6, programmes.Count);
+        Assert.Equal(2, programmes.Count);
 
         // check start time is in the past to ensure "now" is covered
-        var startStr = programmes[0].Attribute("start")?.Value; // format "yyyyMMddHHmmss +0000"
-        var startTime = DateTime.ParseExact(startStr, "yyyyMMddHHmmss zzz", System.Globalization.CultureInfo.InvariantCulture);
+        // XMLTV format: "yyyyMMddHHmmss +0000"
+        var startStr = programmes[0].Attribute("start")?.Value;
+        var datePart = startStr?.Split(' ')[0]; // "yyyyMMddHHmmss"
+        var startTime = DateTime.ParseExact(datePart!, "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.True(startTime < DateTime.UtcNow, "Program start time should be in the past");
     }

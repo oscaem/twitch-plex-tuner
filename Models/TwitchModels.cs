@@ -81,4 +81,5 @@ public class ChannelInfo
     public string StreamThumbnailUrl { get; set; } = string.Empty;
     public DateTime? StartedAt { get; set; }
     public string? StreamId { get; set; }  // Used for cache invalidation
+    public bool RecordEnabled { get; set; } // Whether this channel should be recorded
 }

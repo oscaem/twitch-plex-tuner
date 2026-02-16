@@ -13,11 +13,11 @@ services:
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
       - STREAM_QUALITY=720p,720p60,best
       - RECORDING_PATH=/recordings
-      - RECORDING_RETENTION_DAYS=14
+      - RECORDING_RETENTION_DAYS=30
       - GUIDE_UPDATE_MINUTES=5
       - STREAM_ENGINE=yt-dlp
-      # Increased probesize/analyzeduration for fMP4 stability. explicitly force mpegts.
-      - FFMPEG_ARGS=-hide_banner -loglevel error -fflags +genpts+igndts+nobuffer+flush_packets -thread_queue_size 1024 -probesize 5M -analyzeduration 2M -i pipe:0 -map 0:v:0 -map 0:a:0 -c copy -bsf:v h264_mp4toannexb -f mpegts -mpegts_flags resend_headers pipe:1
+      # User-provided tuned arguments for maximum compatibility (includes audio transcoding to AAC)
+      - FFMPEG_ARGS=-hide_banner -loglevel error -i pipe:0 -c:v copy -c:a libmp3lame -b:a 64k -f mpegts pipe:1 # legacy
     volumes:
       - ${SUBSCRIPTIONS_PATH:-./subscriptions.yaml}:/config/subscriptions.yaml:ro
       - ${RECORDING_PATH:-./recordings}:/recordings

@@ -38,13 +38,36 @@ public class TwitchService
 
             var yaml = await File.ReadAllTextAsync(_config.SubscriptionsPath);
             var deserializer = new DeserializerBuilder().Build();
-            var subs = deserializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(yaml);
+            
+            // Parse as generic object to handle mixed types (dict + list)
+            var root = deserializer.Deserialize<Dictionary<string, object>>(yaml);
 
             Dictionary<string, string>? channelDict = null;
-            if (subs.ContainsKey("twitch_recorder")) channelDict = subs["twitch_recorder"];
-            else if (subs.ContainsKey("subscriptions")) channelDict = subs["subscriptions"];
+            
+            // Try twitch_recorder or subscriptions key
+            foreach (var key in new[] { "twitch_recorder", "subscriptions" })
+            {
+                if (root.ContainsKey(key) && root[key] is Dictionary<object, object> raw)
+                {
+                    channelDict = raw.ToDictionary(k => k.Key.ToString()!, v => v.Value.ToString()!);
+                    break;
+                }
+            }
 
             if (channelDict == null || !channelDict.Any()) return;
+
+            // Parse optional recording list
+            var recordingLogins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.ContainsKey("recording") && root["recording"] is List<object> recordingList)
+            {
+                foreach (var item in recordingList)
+                {
+                    var login = item.ToString()?.Trim().ToLower();
+                    if (!string.IsNullOrEmpty(login))
+                        recordingLogins.Add(login);
+                }
+                Console.WriteLine($"Recording enabled for {recordingLogins.Count} channel(s): {string.Join(", ", recordingLogins)}");
+            }
 
             var newChannels = new List<ChannelInfo>();
             foreach (var kvp in channelDict)
@@ -56,7 +79,8 @@ public class TwitchService
                 {
                     Login = login,
                     DisplayName = kvp.Key,
-                    ProfileImageUrl = $"https://static-cdn.jtvnw.net/jtv_user_pictures/{login}-profile_image-300x300.png"
+                    ProfileImageUrl = $"https://static-cdn.jtvnw.net/jtv_user_pictures/{login}-profile_image-300x300.png",
+                    RecordEnabled = recordingLogins.Contains(login)
                 });
             }
 

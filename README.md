@@ -26,6 +26,11 @@ Create a folder on your NAS (e.g., `/volume1/docker/twitch-plex-tuner`) with:
 twitch_recorder:
   "EdeLive": "https://www.twitch.tv/edelive"
   "Nils": "https://www.twitch.tv/nils"
+
+# Optional: only these channels will be recorded when RECORDING_PATH is set
+recording:
+  - edelive
+  - nils
 ```
 
 **`.env`** (create this file):
@@ -123,16 +128,24 @@ cd /volume1/docker/twitch-plex-tuner
 
 ## 📹 Recording (No Plex Pass Needed)
 
-When `RECORDING_PATH` is set, the tuner automatically records live streams:
+Recording uses **streamlink** (separate from the live streaming pipeline) and only records channels listed in the `recording:` section of `subscriptions.yaml`.
 
 - Checks for live channels every 2 minutes
 - Saves to: `{RECORDING_PATH}/{DisplayName}/{timestamp} - {title}.ts`
 - Stops recording when stream ends
 - Files organized by streamer name
+- **Retention**: Old recordings are deleted after `RECORDING_RETENTION_DAYS` (default 30 days)
 
-**To disable recording**: Remove the `RECORDING_PATH` environment variable.
+### Per-Channel Config
+Add a `recording:` list to your `subscriptions.yaml` with the login names of channels to record:
+```yaml
+recording:
+  - edelive
+  - nils
+```
+Channels **not** in this list are tracked/viewable but **not** recorded.
 
-**To change quality**: Set `STREAM_QUALITY=720p60,720p,best` (lower for NAS storage).
+**To disable all recording**: Remove the `RECORDING_PATH` environment variable.
 
 ---
 
@@ -145,7 +158,8 @@ When `RECORDING_PATH` is set, the tuner automatically records live streams:
 | `BASE_URL` | `http://localhost:5000` | Public URL for M3U/XMLTV |
 | `STREAM_QUALITY` | `1080p60,1080p,720p60,720p,best` | Quality preference |
 | `RECORDING_PATH` | *(disabled)* | Path to save recordings |
-| `GUIDE_UPDATE_MINUTES` | `10` | How often to refresh stream status |
+| `RECORDING_RETENTION_DAYS` | `30` | Days to keep recordings before deletion |
+| `GUIDE_UPDATE_MINUTES` | `5` | How often to refresh Twitch stream status |
 
 ---
 
@@ -165,7 +179,7 @@ Use `./scripts/rebuild.sh` instead of Container Manager UI.
 3. View logs for recording errors
 
 ### Guide shows wrong status
-Guide updates every 10 minutes. For fastest updates, manually refresh in Plex: Settings → Live TV → Refresh Guide.
+Guide updates every `GUIDE_UPDATE_MINUTES` (default 5). Jellyfin re-fetches M3U/XMLTV automatically; ensure your Jellyfin Live TV guide refresh is set to match. For Plex: Settings → Live TV → Refresh Guide.
 
 ---
 

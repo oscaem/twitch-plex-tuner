@@ -7,8 +7,9 @@ using TwitchPlexTuner.Controllers;
 namespace TwitchPlexTuner.Services;
 
 /// <summary>
-/// Background service that monitors live streams and optionally records them.
-/// Recording is triggered when a channel goes live and RECORDING_PATH is set.
+/// Background service that monitors live streams and records them using streamlink.
+/// Only channels with RecordEnabled=true (from subscriptions.yaml "recording" list) are recorded.
+/// Completely decoupled from the streaming/playback pipeline.
 /// </summary>
 public class RecordingService : BackgroundService
 {
@@ -39,6 +40,9 @@ public class RecordingService : BackgroundService
             _logger.LogInformation("Recording disabled (RECORDING_PATH not set)");
             return;
         }
+
+        // Ensure recording directory exists
+        Directory.CreateDirectory(_recordingPath);
 
         _logger.LogInformation("Recording service started. Output: {Path}, Retention: {Days} days", _recordingPath, _retentionDays);
 
@@ -80,8 +84,15 @@ public class RecordingService : BackgroundService
     private async Task CheckAndRecordLiveStreamsAsync(CancellationToken ct)
     {
         var channels = _twitchService.GetChannels();
+        var recordableChannels = channels.Where(c => c.IsLive && c.RecordEnabled).ToList();
         
-        foreach (var channel in channels.Where(c => c.IsLive))
+        if (recordableChannels.Any())
+        {
+            _logger.LogDebug("Live channels eligible for recording: {Channels}", 
+                string.Join(", ", recordableChannels.Select(c => c.Login)));
+        }
+
+        foreach (var channel in recordableChannels)
         {
             // Skip if already recording this channel
             if (_activeRecordings.ContainsKey(channel.Login))
@@ -97,7 +108,7 @@ public class RecordingService : BackgroundService
 
             // Start recording
             _logger.LogInformation("[{Login}] Starting recording for: {Title}", channel.Login, channel.StreamTitle);
-            var process = await StartRecordingAsync(channel, ct);
+            var process = StartRecording(channel);
             
             if (process != null)
             {
@@ -105,11 +116,11 @@ public class RecordingService : BackgroundService
             }
         }
 
-        // Clean up recordings for channels that went offline
-        var liveLogins = channels.Where(c => c.IsLive).Select(c => c.Login).ToHashSet();
+        // Clean up recordings for channels that went offline or lost RecordEnabled
+        var activeLiveLogins = recordableChannels.Select(c => c.Login).ToHashSet();
         foreach (var login in _activeRecordings.Keys.ToList())
         {
-            if (!liveLogins.Contains(login))
+            if (!activeLiveLogins.Contains(login))
             {
                 if (_activeRecordings.TryRemove(login, out var process))
                 {
@@ -117,7 +128,7 @@ public class RecordingService : BackgroundService
                     {
                         if (!process.HasExited)
                         {
-                            _logger.LogInformation("[{Login}] Channel went offline, stopping recording", login);
+                            _logger.LogInformation("[{Login}] Channel went offline or recording disabled, stopping recording", login);
                             process.Kill(true);
                         }
                     }
@@ -130,36 +141,30 @@ public class RecordingService : BackgroundService
         }
     }
 
-    private async Task<Process?> StartRecordingAsync(ChannelInfo channel, CancellationToken ct)
+    private Process? StartRecording(ChannelInfo channel)
     {
         try
         {
-            // Create output directory if needed
+            // Create output directory per channel
             var channelDir = Path.Combine(_recordingPath, SanitizeFilename(channel.DisplayName));
             Directory.CreateDirectory(channelDir);
 
-            // Generate filename: {Channel} - {Date} - {Title}.mp4
+            // Generate filename: {Channel} - {Date} - {Title}.ts
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm");
             var title = SanitizeFilename(channel.StreamTitle);
             if (title.Length > 50) title = title[..50];
             
-            var filename = $"{channel.DisplayName} - {timestamp} - {title}.mp4";
+            var filename = $"{channel.DisplayName} - {timestamp} - {title}.ts";
             var outputPath = Path.Combine(channelDir, filename);
 
-            // Use yt-dlp for recording
-            // We adding --exec to run chmod after download? No, that's complex.
-            // We will just run chmod in C# after process starts? No, file isn't there yet.
-            // We will do it after process exits? Yes.
-
-            // Use yt-dlp for recording (better Plex compatibility + mp4 container)
-            // -f bestvideo*+bestaudio/best: best quality
-            // --merge-output-format mp4: ensure mp4 container
-            // --no-part: do not use .part files (Plex might ignore them, but we want the final file to be clean)
-            // Note: Docker image must have ffmpeg installed for merge logic
+            // Use streamlink for recording — it handles live HLS natively and writes directly to file.
+            // This is completely separate from the streaming pipeline (StreamController uses its own processes).
+            var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "best";
+            
             var psi = new ProcessStartInfo
             {
-                FileName = "yt-dlp",
-                Arguments = $"--output \"{outputPath}\" --format \"bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best\" --merge-output-format mp4 --no-part --quiet --no-warnings --exec \"chmod 666 {{}}\" \"twitch.tv/{channel.Login}\"",
+                FileName = "streamlink",
+                Arguments = $"--twitch-disable-ads --hls-live-edge 3 --hls-segment-threads 2 --output \"{outputPath}\" \"twitch.tv/{channel.Login}\" {quality}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -169,16 +174,35 @@ public class RecordingService : BackgroundService
             var process = new Process { StartInfo = psi };
             process.Start();
 
-            _logger.LogInformation("[{Login}] Recording started: {Path}", channel.Login, outputPath);
+            _logger.LogInformation("[{Login}] Recording started → {Path} (PID: {PID})", channel.Login, outputPath, process.Id);
 
-            // Log errors in background
+            // Log stderr in background for diagnostics
             _ = Task.Run(async () =>
             {
-                var stderr = await process.StandardError.ReadToEndAsync();
-                if (!string.IsNullOrWhiteSpace(stderr))
+                try
                 {
-                    _logger.LogWarning("[{Login}] Recording stderr: {Stderr}", channel.Login, stderr.Trim());
+                    using var reader = process.StandardError;
+                    string? line;
+                    while ((line = await reader.ReadLineAsync()) != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(line))
+                        {
+                            _logger.LogDebug("[{Login}] Recording: {Line}", channel.Login, line.Trim());
+                        }
+                    }
                 }
+                catch { /* Process ended */ }
+            }, CancellationToken.None);
+
+            // Drain stdout (streamlink may write progress info)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var reader = process.StandardOutput;
+                    while (await reader.ReadLineAsync() != null) { }
+                }
+                catch { /* Process ended */ }
             }, CancellationToken.None);
 
             return process;
@@ -216,6 +240,20 @@ public class RecordingService : BackgroundService
                         _logger.LogWarning(ex, "Failed to delete old recording: {Path}", file);
                     }
                 }
+            }
+
+            // Clean up empty directories
+            foreach (var dir in Directory.GetDirectories(_recordingPath))
+            {
+                try
+                {
+                    if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                    {
+                        Directory.Delete(dir);
+                        _logger.LogDebug("Removed empty recording directory: {Dir}", dir);
+                    }
+                }
+                catch { }
             }
 
             if (deletedCount > 0)

@@ -27,6 +27,12 @@ public class PlexService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (string.IsNullOrEmpty(_config.PlexServerUrl) || string.IsNullOrEmpty(_config.PlexToken))
+        {
+            _logger.LogInformation("Plex Server URL or Token not configured. Plex guide refresh disabled.");
+            return;
+        }
+
         // Initial delay to let application startup
         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
 
@@ -34,14 +40,7 @@ public class PlexService : BackgroundService
         {
             try
             {
-                if (string.IsNullOrEmpty(_config.PlexServerUrl) || string.IsNullOrEmpty(_config.PlexToken))
-                {
-                    _logger.LogWarning("Plex Server URL or Token not configured. Skipping Guide Refresh.");
-                }
-                else
-                {
-                    await RefreshPlexGuideAsync(stoppingToken);
-                }
+                await RefreshPlexGuideAsync(stoppingToken);
             }
             catch (Exception ex)
             {
