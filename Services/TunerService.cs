@@ -75,28 +75,41 @@ public class TunerService
                 new XElement("icon", new XAttribute("src", c.ProfileImageUrl)));
             doc.Root!.Add(channelElem);
 
-            // Start 15 mins in the past to ensure Plex finds the "current" program.
-            var start = DateTime.UtcNow.AddMinutes(-15);
-            var end = start.AddHours(24); 
-
-            string title, desc, category, icon;
+            // Generate programmes for a 6-hour window
+            var now = DateTime.UtcNow;
+            var windowStart = now.AddMinutes(-30); // 30 mins buffer for 'current'
+            var windowEnd = now.AddHours(6);
 
             if (c.IsLive)
             {
-                title = $"🟢 {c.StreamTitle}"; // Add status indicator to title
-                desc = $"Streaming {c.GameName}. Started at {c.StartedAt.GetValueOrDefault().ToLocalTime():HH:mm}.";
-                category = c.GameName;
-                icon = !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
+                // Live Stream: One block starting from actual start time
+                var startTime = c.StartedAt ?? windowStart;
+                var endTime = windowEnd; 
+
+                string title = $"🟢 {c.StreamTitle}";
+                string desc = $"Streaming {c.GameName}. Started at {c.StartedAt.GetValueOrDefault().ToLocalTime():HH:mm}.";
+                string category = c.GameName;
+                string icon = !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
+
+                doc.Root!.Add(CreateProgramme(c, startTime, endTime, title, desc, category, icon));
             }
             else
             {
-                title = $"{c.DisplayName} is Offline";
-                desc = "Channel is currently offline. Tune in later!";
-                category = "Offline";
-                icon = c.ProfileImageUrl;
-            }
+                // Offline: Multiple 30-minute placeholder blocks
+                var current = windowStart;
+                while (current < windowEnd)
+                {
+                    var slotEnd = current.AddMinutes(30);
+                    
+                    string title = $"{c.DisplayName} (Offline)";
+                    string desc = "Channel is currently offline. Tune in later!";
+                    string category = "Offline";
+                    string icon = c.ProfileImageUrl;
 
-            doc.Root!.Add(CreateProgramme(c, start, end, title, desc, category, icon));
+                    doc.Root!.Add(CreateProgramme(c, current, slotEnd, title, desc, category, icon));
+                    current = slotEnd;
+                }
+            }
         }
 
         return new XDeclaration("1.0", "utf-8", null) + Environment.NewLine + doc.ToString();

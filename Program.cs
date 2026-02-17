@@ -13,6 +13,8 @@ builder.Services.Configure<TwitchConfig>(options =>
     options.PlexServerUrl = Environment.GetEnvironmentVariable("PLEX_SERVER_URL") ?? string.Empty;
     options.PlexToken = Environment.GetEnvironmentVariable("PLEX_TOKEN") ?? string.Empty;
     options.ThreadfinUrl = Environment.GetEnvironmentVariable("THREADFIN_URL") ?? string.Empty;
+    options.JellyfinUrl = Environment.GetEnvironmentVariable("JELLYFIN_URL") ?? string.Empty;
+    options.JellyfinApiKey = Environment.GetEnvironmentVariable("JELLYFIN_API_KEY") ?? string.Empty;
     options.StreamEngine = Environment.GetEnvironmentVariable("STREAM_ENGINE") ?? "streamlink";
     options.FFmpegArgs = Environment.GetEnvironmentVariable("FFMPEG_ARGS") ?? string.Empty;
 });
@@ -20,9 +22,11 @@ builder.Services.Configure<TwitchConfig>(options =>
 // Add services
 builder.Services.AddSingleton<TwitchService>();
 builder.Services.AddSingleton<TunerService>();
+builder.Services.AddSingleton<JellyfinService>();
 builder.Services.AddHostedService<TwitchUpdateService>();
 builder.Services.AddHostedService<RecordingService>();
 builder.Services.AddHostedService<PlexService>();
+builder.Services.AddHostedService<JellyfinService>();
 builder.Services.AddHttpClient();
 builder.Services.AddControllers()
     .AddJsonOptions(options =>

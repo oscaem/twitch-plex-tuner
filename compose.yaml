@@ -16,6 +16,8 @@ services:
       - RECORDING_RETENTION_DAYS=30
       - GUIDE_UPDATE_MINUTES=5
       - STREAM_ENGINE=yt-dlp
+      - JELLYFIN_URL=http://192.168.178.39:8096
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
       # User-provided tuned arguments for maximum compatibility (includes audio transcoding to AAC)
       - FFMPEG_ARGS=-hide_banner -loglevel error -i pipe:0 -c:v copy -c:a libmp3lame -b:a 64k -f mpegts pipe:1 # legacy
     volumes:
@@ -23,17 +25,3 @@ services:
       - ${RECORDING_PATH:-./recordings}:/recordings
     ports:
       - "5200:5000"
-
-  # Threadfin: Buffers streams and presents them to Plex
-  # threadfin:
-  #   image: fyb3roptik/threadfin:latest
-  #   container_name: threadfin
-  #   restart: always
-  #   ports:
-  #     - "34400:34400"
-  #   environment:
-  #     - PUID=1000
-  #     - PGID=1000
-  #   volumes:
-  #     - ./threadfin/conf:/home/threadfin/conf
-  #     - ./threadfin/temp:/tmp/threadfin

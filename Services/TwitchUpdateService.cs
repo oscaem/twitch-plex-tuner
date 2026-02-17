@@ -9,12 +9,14 @@ namespace TwitchPlexTuner.Services;
 public class TwitchUpdateService : BackgroundService
 {
     private readonly TwitchService _twitchService;
+    private readonly JellyfinService _jellyfinService;
     private readonly ILogger<TwitchUpdateService> _logger;
     private readonly int _updateMinutes;
 
-    public TwitchUpdateService(TwitchService twitchService, ILogger<TwitchUpdateService> logger)
+    public TwitchUpdateService(TwitchService twitchService, JellyfinService jellyfinService, ILogger<TwitchUpdateService> logger)
     {
         _twitchService = twitchService;
+        _jellyfinService = jellyfinService;
         _logger = logger;
         
         if (!int.TryParse(Environment.GetEnvironmentVariable("GUIDE_UPDATE_MINUTES"), out _updateMinutes) || _updateMinutes < 1)
@@ -33,11 +35,14 @@ public class TwitchUpdateService : BackgroundService
             {
                 _logger.LogInformation("Updating Twitch channels...");
                 await _twitchService.UpdateChannelsAsync();
-                _logger.LogInformation("Update complete.");
+                _logger.LogInformation("Update complete. Triggering Jellyfin guide refresh...");
+                
+                // Trigger Jellyfin guide refresh
+                await _jellyfinService.RefreshGuideAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error updating Twitch channels");
+                _logger.LogError(ex, "Error updating Twitch channels or refreshing Jellyfin guide");
             }
 
             await Task.Delay(TimeSpan.FromMinutes(_updateMinutes), stoppingToken);

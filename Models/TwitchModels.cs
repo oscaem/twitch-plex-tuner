@@ -14,6 +14,8 @@ public class TwitchConfig
     public string PlexServerUrl { get; set; } = string.Empty;
     public string PlexToken { get; set; } = string.Empty;
     public string ThreadfinUrl { get; set; } = string.Empty;
+    public string JellyfinUrl { get; set; } = string.Empty;
+    public string JellyfinApiKey { get; set; } = string.Empty;
     public string StreamEngine { get; set; } = "streamlink";
     public string FFmpegArgs { get; set; } = string.Empty;
 }
