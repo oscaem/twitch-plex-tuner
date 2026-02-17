@@ -25,8 +25,6 @@ builder.Services.AddSingleton<TunerService>();
 builder.Services.AddSingleton<JellyfinService>();
 builder.Services.AddHostedService<TwitchUpdateService>();
 builder.Services.AddHostedService<RecordingService>();
-builder.Services.AddHostedService<PlexService>();
-builder.Services.AddHostedService<JellyfinService>();
 builder.Services.AddHttpClient();
 builder.Services.AddControllers()
     .AddJsonOptions(options =>

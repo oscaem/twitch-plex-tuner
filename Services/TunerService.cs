@@ -117,9 +117,12 @@ public class TunerService
 
     private XElement CreateProgramme(ChannelInfo c, DateTime start, DateTime end, string title, string desc, string category, string iconUrl)
     {
+        // IMPORTANT: "0" is a digit placeholder in .NET custom date formats.
+        // "yyyyMMddHHmmss +0000" would interpret +0000 as format specifiers, producing garbage like "+0357".
+        // We must concatenate the literal "+0000" separately.
         return new XElement("programme",
-                new XAttribute("start", start.ToString("yyyyMMddHHmmss +0000")),
-                new XAttribute("stop", end.ToString("yyyyMMddHHmmss +0000")),
+                new XAttribute("start", start.ToString("yyyyMMddHHmmss") + " +0000"),
+                new XAttribute("stop", end.ToString("yyyyMMddHHmmss") + " +0000"),
                 new XAttribute("channel", c.Login),
                 new XElement("title", title),
                 new XElement("desc", desc),

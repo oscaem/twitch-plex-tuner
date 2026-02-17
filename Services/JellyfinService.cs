@@ -2,7 +2,6 @@ using System;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TwitchPlexTuner.Models;
@@ -12,7 +11,11 @@ using System.Linq;
 
 namespace TwitchPlexTuner.Services;
 
-public class JellyfinService : BackgroundService
+/// <summary>
+/// Service that triggers Jellyfin guide refreshes on demand.
+/// Called by TwitchUpdateService after channel state is updated.
+/// </summary>
+public class JellyfinService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TwitchConfig _config;
@@ -24,22 +27,15 @@ public class JellyfinService : BackgroundService
         _httpClientFactory = httpClientFactory;
         _config = config.Value;
         _logger = logger;
-    }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        if (string.IsNullOrEmpty(_config.JellyfinUrl) || string.IsNullOrEmpty(_config.JellyfinApiKey))
+        if (!string.IsNullOrEmpty(_config.JellyfinUrl) && !string.IsNullOrEmpty(_config.JellyfinApiKey))
+        {
+            _logger.LogInformation("Jellyfin guide refresh enabled for {Url}", _config.JellyfinUrl);
+        }
+        else
         {
             _logger.LogInformation("Jellyfin URL or API Key not configured. Jellyfin guide refresh disabled.");
-            return;
         }
-
-        _logger.LogInformation("Jellyfin guide refresh service enabled for {Url}", _config.JellyfinUrl);
-
-        // This service mainly provides RefreshGuideAsync to be called by others,
-        // but it could also do an initial refresh.
-        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
-        await RefreshGuideAsync(stoppingToken);
     }
 
     public async Task RefreshGuideAsync(CancellationToken ct = default)

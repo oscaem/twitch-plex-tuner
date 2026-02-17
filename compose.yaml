@@ -1,5 +1,5 @@
 services:
-  # The Tuner: Fetches Twitch streams and serves them to Threadfin
+  # The Tuner: Fetches Twitch streams and serves them to Jellyfin
   tpt:
     build: .
     image: twitch-plex-tuner:latest
@@ -8,7 +8,7 @@ services:
     environment:
       - CLIENT_ID=${CLIENT_ID}
       - CLIENT_SECRET=${CLIENT_SECRET}
-      # IMPORTANT: This must be reachable by Plex!
+      # IMPORTANT: This must be reachable by Jellyfin!
       - BASE_URL=http://192.168.178.39:5200
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
       - STREAM_QUALITY=720p,720p60,best

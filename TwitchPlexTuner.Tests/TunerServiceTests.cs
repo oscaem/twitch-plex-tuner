@@ -60,9 +60,14 @@ public class TunerServiceTests
         // XMLTV format: "yyyyMMddHHmmss +0000"
         var firstProg = programmes.First(p => p.Attribute("channel")?.Value == "channel1");
         var startStr = firstProg.Attribute("start")?.Value;
+        Assert.Contains("+0000", startStr);
         var datePart = startStr?.Split(' ')[0]; // "yyyyMMddHHmmss"
         var startTime = DateTime.ParseExact(datePart!, "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.True(startTime < DateTime.UtcNow.AddMinutes(1), "First program start time should be in the past or very near future");
+
+        // Verify stop format too
+        var stopStr = firstProg.Attribute("stop")?.Value;
+        Assert.Contains("+0000", stopStr);
     }
 }
