@@ -86,7 +86,7 @@ public class TunerService
                 var startTime = c.StartedAt ?? windowStart;
                 var endTime = windowEnd; 
 
-                string title = $"🟢 {c.StreamTitle}";
+                string title = $"🟢 {c.DisplayName} - {c.StreamTitle}";
                 string desc = $"Streaming {c.GameName}. Started at {c.StartedAt.GetValueOrDefault().ToLocalTime():HH:mm}.";
                 string category = c.GameName;
                 string icon = !string.IsNullOrEmpty(c.StreamThumbnailUrl) ? c.StreamThumbnailUrl : c.ProfileImageUrl;
