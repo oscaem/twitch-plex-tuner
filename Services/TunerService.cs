@@ -82,8 +82,9 @@ public class TunerService
 
             if (c.IsLive)
             {
-                // Live Stream: One block starting from actual start time
-                var startTime = c.StartedAt ?? windowStart;
+                // Live Stream: Use current window start so the guide shows a "now" timeslot.
+                // The actual Twitch start time is included in the description.
+                var startTime = windowStart;
                 var endTime = windowEnd; 
 
                 string title = $"🟢 {c.DisplayName} - {c.StreamTitle}";

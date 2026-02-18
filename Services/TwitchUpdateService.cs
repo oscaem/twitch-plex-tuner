@@ -10,13 +10,19 @@ public class TwitchUpdateService : BackgroundService
 {
     private readonly TwitchService _twitchService;
     private readonly JellyfinService _jellyfinService;
+    private readonly RecordingService _recordingService;
     private readonly ILogger<TwitchUpdateService> _logger;
     private readonly int _updateMinutes;
 
-    public TwitchUpdateService(TwitchService twitchService, JellyfinService jellyfinService, ILogger<TwitchUpdateService> logger)
+    public TwitchUpdateService(
+        TwitchService twitchService,
+        JellyfinService jellyfinService,
+        RecordingService recordingService,
+        ILogger<TwitchUpdateService> logger)
     {
         _twitchService = twitchService;
         _jellyfinService = jellyfinService;
+        _recordingService = recordingService;
         _logger = logger;
         
         if (!int.TryParse(Environment.GetEnvironmentVariable("GUIDE_UPDATE_MINUTES"), out _updateMinutes) || _updateMinutes < 1)
@@ -39,6 +45,9 @@ public class TwitchUpdateService : BackgroundService
                 
                 // Trigger Jellyfin guide refresh
                 await _jellyfinService.RefreshGuideAsync(stoppingToken);
+                
+                // Notify recording service that fresh channel data is available
+                _recordingService.NotifyChannelsUpdated();
             }
             catch (Exception ex)
             {

@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using TwitchPlexTuner.Models;
-using TwitchPlexTuner.Controllers;
 
 namespace TwitchPlexTuner.Services;
 
@@ -10,6 +9,12 @@ namespace TwitchPlexTuner.Services;
 /// Background service that monitors live streams and records them using streamlink.
 /// Only channels with RecordEnabled=true (from subscriptions.yaml "recording" list) are recorded.
 /// Completely decoupled from the streaming/playback pipeline.
+/// 
+/// Lifecycle:
+///   - Runs as a BackgroundService with its own loop
+///   - Wakes up when TwitchUpdateService signals new channel data via NotifyChannelsUpdated()
+///   - Falls back to a 5-minute timeout if no signal is received (safety net)
+///   - Manages streamlink child processes independently
 /// </summary>
 public class RecordingService : BackgroundService
 {
@@ -18,8 +23,11 @@ public class RecordingService : BackgroundService
     private readonly string _recordingPath;
     private readonly int _retentionDays;
     
+    // Signal from TwitchUpdateService that fresh channel data is available
+    private readonly ManualResetEventSlim _updateSignal = new(false);
+    
     // Track active recordings to avoid duplicates
-    private static readonly ConcurrentDictionary<string, Process> _activeRecordings = new();
+    private readonly ConcurrentDictionary<string, RecordingInfo> _activeRecordings = new();
 
     public RecordingService(TwitchService twitchService, ILogger<RecordingService> logger)
     {
@@ -29,22 +37,41 @@ public class RecordingService : BackgroundService
         
         if (!int.TryParse(Environment.GetEnvironmentVariable("RECORDING_RETENTION_DAYS"), out _retentionDays))
         {
-            _retentionDays = 30; // Default to 30 days
+            _retentionDays = 30;
         }
+    }
+
+    /// <summary>
+    /// Called by TwitchUpdateService after each channel data refresh.
+    /// Wakes the recording loop to immediately check for new/ended streams.
+    /// </summary>
+    public void NotifyChannelsUpdated()
+    {
+        _logger.LogDebug("Recording service received channel update notification");
+        _updateSignal.Set();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (string.IsNullOrEmpty(_recordingPath))
         {
-            _logger.LogInformation("Recording disabled (RECORDING_PATH not set)");
+            _logger.LogWarning("⏹ Recording DISABLED — RECORDING_PATH environment variable is not set. " +
+                "Set RECORDING_PATH to a directory path to enable recording.");
             return;
         }
 
         // Ensure recording directory exists
-        Directory.CreateDirectory(_recordingPath);
-
-        _logger.LogInformation("Recording service started. Output: {Path}, Retention: {Days} days", _recordingPath, _retentionDays);
+        try
+        {
+            Directory.CreateDirectory(_recordingPath);
+            _logger.LogInformation("🎬 Recording service STARTED — Output: {Path}, Retention: {Days} days",
+                _recordingPath, _retentionDays);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Failed to create recording directory {Path}. Recording disabled.", _recordingPath);
+            return;
+        }
 
         var lastCleanup = DateTime.MinValue;
 
@@ -52,6 +79,12 @@ public class RecordingService : BackgroundService
         {
             try
             {
+                // Wait for signal from TwitchUpdateService, or timeout after 5 minutes (safety net)
+                _updateSignal.Wait(TimeSpan.FromMinutes(5), stoppingToken);
+                _updateSignal.Reset();
+
+                _logger.LogInformation("🔄 Recording sync triggered — checking live channels...");
+
                 // Run cleanup once per hour
                 if (DateTime.UtcNow - lastCleanup > TimeSpan.FromHours(1))
                 {
@@ -59,89 +92,104 @@ public class RecordingService : BackgroundService
                     lastCleanup = DateTime.UtcNow;
                 }
 
-                await CheckAndRecordLiveStreamsAsync(stoppingToken);
+                await SyncRecordingsAsync(stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Recording service shutting down...");
+                break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in recording service");
+                _logger.LogError(ex, "❌ Error in recording service main loop");
+                // Don't exit — keep trying
+                try { await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken); } catch { break; }
             }
-
-            // Check every 2 minutes (separate from guide updates)
-            await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken);
         }
 
         // Cleanup: stop all recordings on shutdown
+        _logger.LogInformation("🛑 Stopping all active recordings ({Count} active)...", _activeRecordings.Count);
         foreach (var kvp in _activeRecordings)
         {
-            try
-            {
-                if (!kvp.Value.HasExited) kvp.Value.Kill(true);
-            }
-            catch { }
+            StopRecording(kvp.Key, "service shutdown");
         }
+        _logger.LogInformation("Recording service stopped.");
     }
 
-    private async Task CheckAndRecordLiveStreamsAsync(CancellationToken ct)
+    private async Task SyncRecordingsAsync(CancellationToken ct)
     {
         var channels = _twitchService.GetChannels();
         var recordableChannels = channels.Where(c => c.IsLive && c.RecordEnabled).ToList();
-        
-        if (recordableChannels.Any())
+        var allRecordEnabledChannels = channels.Where(c => c.RecordEnabled).ToList();
+
+        _logger.LogInformation("📊 Channel status: {Total} total, {RecordEnabled} record-enabled, {Live} live & recordable, {ActiveRecordings} currently recording",
+            channels.Count,
+            allRecordEnabledChannels.Count,
+            recordableChannels.Count,
+            _activeRecordings.Count);
+
+        if (!allRecordEnabledChannels.Any())
         {
-            _logger.LogDebug("Live channels eligible for recording: {Channels}", 
-                string.Join(", ", recordableChannels.Select(c => c.Login)));
+            _logger.LogWarning("⚠️ No channels have recording enabled. Add a 'recording' list to subscriptions.yaml.");
         }
 
+        // 1. Start recordings for newly-live channels
         foreach (var channel in recordableChannels)
         {
-            // Skip if already recording this channel
-            if (_activeRecordings.ContainsKey(channel.Login))
+            if (_activeRecordings.TryGetValue(channel.Login, out var existing))
             {
                 // Check if the recording process is still running
-                if (_activeRecordings.TryGetValue(channel.Login, out var existingProcess))
+                if (!existing.Process.HasExited)
                 {
-                    if (!existingProcess.HasExited) continue;
-                    _activeRecordings.TryRemove(channel.Login, out _);
-                    _logger.LogInformation("[{Login}] Previous recording ended, will restart if still live", channel.Login);
+                    var duration = DateTime.UtcNow - existing.StartedAt;
+                    _logger.LogDebug("⏺ [{Login}] Already recording for {Duration:hh\\:mm\\:ss} — {Title}",
+                        channel.Login, duration, channel.StreamTitle);
+                    continue;
                 }
+
+                // Process died — clean up and restart
+                var exitCode = existing.Process.ExitCode;
+                _logger.LogWarning("⚠️ [{Login}] Recording process died (exit code: {ExitCode}, ran for {Duration:hh\\:mm\\:ss}). Will restart.",
+                    channel.Login, exitCode, DateTime.UtcNow - existing.StartedAt);
+                _activeRecordings.TryRemove(channel.Login, out _);
             }
 
-            // Start recording
-            _logger.LogInformation("[{Login}] Starting recording for: {Title}", channel.Login, channel.StreamTitle);
-            var process = StartRecording(channel);
-            
-            if (process != null)
-            {
-                _activeRecordings[channel.Login] = process;
-            }
+            // Start new recording
+            StartRecording(channel);
         }
 
-        // Clean up recordings for channels that went offline or lost RecordEnabled
-        var activeLiveLogins = recordableChannels.Select(c => c.Login).ToHashSet();
+        // 2. Stop recordings for channels that went offline or lost RecordEnabled
+        var activeLiveLogins = recordableChannels.Select(c => c.Login).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var login in _activeRecordings.Keys.ToList())
         {
             if (!activeLiveLogins.Contains(login))
             {
-                if (_activeRecordings.TryRemove(login, out var process))
-                {
-                    try
-                    {
-                        if (!process.HasExited)
-                        {
-                            _logger.LogInformation("[{Login}] Channel went offline or recording disabled, stopping recording", login);
-                            process.Kill(true);
-                        }
-                    }
-                    catch { }
-                    
-                    // Also invalidate stream cache
-                    StreamController.InvalidateCache(login);
-                }
+                var channel = channels.FirstOrDefault(c => c.Login.Equals(login, StringComparison.OrdinalIgnoreCase));
+                var reason = channel == null ? "channel removed from config"
+                    : !channel.RecordEnabled ? "recording disabled in config"
+                    : !channel.IsLive ? "channel went offline"
+                    : "unknown";
+
+                StopRecording(login, reason);
             }
         }
+
+        // 3. Summary
+        if (_activeRecordings.Any())
+        {
+            var summary = _activeRecordings.Select(kvp =>
+            {
+                var duration = DateTime.UtcNow - kvp.Value.StartedAt;
+                var fileSize = GetFileSizeMB(kvp.Value.OutputPath);
+                return $"{kvp.Key} ({duration:hh\\:mm\\:ss}, {fileSize:F1}MB)";
+            });
+            _logger.LogInformation("📹 Active recordings: {Recordings}", string.Join(" | ", summary));
+        }
+
+        await Task.CompletedTask;
     }
 
-    private Process? StartRecording(ChannelInfo channel)
+    private void StartRecording(ChannelInfo channel)
     {
         try
         {
@@ -157,8 +205,6 @@ public class RecordingService : BackgroundService
             var filename = $"{channel.DisplayName} - {timestamp} - {title}.ts";
             var outputPath = Path.Combine(channelDir, filename);
 
-            // Use streamlink for recording — it handles live HLS natively and writes directly to file.
-            // This is completely separate from the streaming pipeline (StreamController uses its own processes).
             var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "best";
             
             var psi = new ProcessStartInfo
@@ -171,10 +217,21 @@ public class RecordingService : BackgroundService
                 CreateNoWindow = true
             };
 
-            var process = new Process { StartInfo = psi };
-            process.Start();
+            _logger.LogInformation("🎬 [{Login}] Starting recording: streamlink {Args}", channel.Login, psi.Arguments);
 
-            _logger.LogInformation("[{Login}] Recording started → {Path} (PID: {PID})", channel.Login, outputPath, process.Id);
+            var process = new Process { StartInfo = psi };
+            
+            if (!process.Start())
+            {
+                _logger.LogError("❌ [{Login}] Failed to start streamlink process", channel.Login);
+                return;
+            }
+
+            var recordingInfo = new RecordingInfo(process, outputPath, DateTime.UtcNow, channel.StreamTitle);
+            _activeRecordings[channel.Login] = recordingInfo;
+
+            _logger.LogInformation("✅ [{Login}] Recording started — PID: {PID}, Output: {Path}, Stream: {Title}",
+                channel.Login, process.Id, outputPath, channel.StreamTitle);
 
             // Log stderr in background for diagnostics
             _ = Task.Run(async () =>
@@ -185,16 +242,51 @@ public class RecordingService : BackgroundService
                     string? line;
                     while ((line = await reader.ReadLineAsync()) != null)
                     {
-                        if (!string.IsNullOrWhiteSpace(line))
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        
+                        var trimmed = line.Trim();
+                        
+                        // Promote important messages to Info level
+                        if (trimmed.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                            trimmed.Contains("fail", StringComparison.OrdinalIgnoreCase))
                         {
-                            _logger.LogDebug("[{Login}] Recording: {Line}", channel.Login, line.Trim());
+                            _logger.LogWarning("⚠️ [{Login}] streamlink: {Line}", channel.Login, trimmed);
+                        }
+                        else if (trimmed.Contains("Opening stream") || 
+                                 trimmed.Contains("Writing output") ||
+                                 trimmed.Contains("Stream ended"))
+                        {
+                            _logger.LogInformation("📝 [{Login}] streamlink: {Line}", channel.Login, trimmed);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("[{Login}] streamlink: {Line}", channel.Login, trimmed);
                         }
                     }
                 }
                 catch { /* Process ended */ }
+                
+                // Process exited — log final status
+                try
+                {
+                    var exitCode = process.ExitCode;
+                    var fileSize = GetFileSizeMB(outputPath);
+                    
+                    if (exitCode == 0)
+                    {
+                        _logger.LogInformation("✅ [{Login}] Recording process exited normally. File: {Path} ({Size:F1}MB)",
+                            channel.Login, outputPath, fileSize);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("⚠️ [{Login}] Recording process exited with code {ExitCode}. File: {Path} ({Size:F1}MB)",
+                            channel.Login, exitCode, outputPath, fileSize);
+                    }
+                }
+                catch { }
             }, CancellationToken.None);
 
-            // Drain stdout (streamlink may write progress info)
+            // Drain stdout
             _ = Task.Run(async () =>
             {
                 try
@@ -204,13 +296,38 @@ public class RecordingService : BackgroundService
                 }
                 catch { /* Process ended */ }
             }, CancellationToken.None);
-
-            return process;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[{Login}] Failed to start recording", channel.Login);
-            return null;
+            _logger.LogError(ex, "❌ [{Login}] Failed to start recording — is streamlink installed?", channel.Login);
+        }
+    }
+
+    private void StopRecording(string login, string reason)
+    {
+        if (_activeRecordings.TryRemove(login, out var info))
+        {
+            var duration = DateTime.UtcNow - info.StartedAt;
+            var fileSize = GetFileSizeMB(info.OutputPath);
+            
+            try
+            {
+                if (!info.Process.HasExited)
+                {
+                    _logger.LogInformation("🛑 [{Login}] Stopping recording — Reason: {Reason}, Duration: {Duration:hh\\:mm\\:ss}, File: {Path} ({Size:F1}MB)",
+                        login, reason, duration, info.OutputPath, fileSize);
+                    info.Process.Kill(true);
+                }
+                else
+                {
+                    _logger.LogInformation("🏁 [{Login}] Recording already ended — Reason: {Reason}, Duration: {Duration:hh\\:mm\\:ss}, Exit code: {ExitCode}, File: {Path} ({Size:F1}MB)",
+                        login, reason, duration, info.Process.ExitCode, info.OutputPath, fileSize);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "⚠️ [{Login}] Error stopping recording process", login);
+            }
         }
     }
 
@@ -223,6 +340,10 @@ public class RecordingService : BackgroundService
             var cutoff = DateTime.Now.AddDays(-_retentionDays);
             var files = Directory.GetFiles(_recordingPath, "*.*", SearchOption.AllDirectories);
             var deletedCount = 0;
+            var totalFreedMB = 0.0;
+
+            _logger.LogInformation("🧹 Running recording cleanup (retention: {Days} days, cutoff: {Cutoff:yyyy-MM-dd HH:mm})",
+                _retentionDays, cutoff);
 
             foreach (var file in files)
             {
@@ -231,9 +352,11 @@ public class RecordingService : BackgroundService
                 {
                     try
                     {
+                        var sizeMB = fi.Length / 1024.0 / 1024.0;
                         fi.Delete();
                         deletedCount++;
-                        _logger.LogDebug("Deleted old recording: {Path}", file);
+                        totalFreedMB += sizeMB;
+                        _logger.LogDebug("🗑 Deleted old recording: {Path} ({Size:F1}MB)", file, sizeMB);
                     }
                     catch (Exception ex)
                     {
@@ -258,13 +381,29 @@ public class RecordingService : BackgroundService
 
             if (deletedCount > 0)
             {
-                _logger.LogInformation("Cleanup completed. Deleted {Count} old recordings.", deletedCount);
+                _logger.LogInformation("🧹 Cleanup complete: deleted {Count} old recordings, freed {Size:F1}MB",
+                    deletedCount, totalFreedMB);
+            }
+            else
+            {
+                _logger.LogDebug("Cleanup complete: no old recordings to remove.");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during recording cleanup");
+            _logger.LogError(ex, "❌ Error during recording cleanup");
         }
+    }
+
+    private static double GetFileSizeMB(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                return new FileInfo(path).Length / 1024.0 / 1024.0;
+        }
+        catch { }
+        return 0;
     }
 
     private static string SanitizeFilename(string filename)
@@ -273,6 +412,11 @@ public class RecordingService : BackgroundService
         return string.Join("", filename.Select(c => invalid.Contains(c) ? '_' : c));
     }
 
-    // Public method to check recording status
-    public static bool IsRecording(string login) => _activeRecordings.ContainsKey(login);
+    /// <summary>Check if a channel is currently being recorded.</summary>
+    public bool IsRecording(string login) => _activeRecordings.ContainsKey(login);
+
+    /// <summary>Get count of active recordings.</summary>
+    public int ActiveRecordingCount => _activeRecordings.Count;
+
+    private record RecordingInfo(Process Process, string OutputPath, DateTime StartedAt, string StreamTitle);
 }
