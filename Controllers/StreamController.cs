@@ -81,8 +81,8 @@ public class StreamController : ControllerBase
         var slPsi = new ProcessStartInfo
         {
             FileName = "streamlink",
-            // Start with only 1 segment (~2s buffer) for fastest startup to satisfy probers.
-            Arguments = $"--twitch-disable-ads --hls-live-edge 1 --hls-segment-threads 4 --hls-segment-attempts 5 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
+            // Start with ringbuffer-size and threads setup for fast startup.
+            Arguments = $"--twitch-disable-ads --stream-segment-threads 4 --stream-segment-attempts 5 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,

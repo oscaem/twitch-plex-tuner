@@ -210,7 +210,7 @@ public class RecordingService : BackgroundService
             var psi = new ProcessStartInfo
             {
                 FileName = "streamlink",
-                Arguments = $"--twitch-disable-ads --hls-live-edge 3 --hls-segment-threads 2 --output \"{outputPath}\" \"twitch.tv/{channel.Login}\" {quality}",
+                Arguments = $"--twitch-disable-ads --stream-segment-threads 2 --output \"{outputPath}\" \"twitch.tv/{channel.Login}\" {quality}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
