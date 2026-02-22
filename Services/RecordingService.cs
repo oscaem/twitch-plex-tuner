@@ -33,7 +33,31 @@ public class RecordingService : BackgroundService
     {
         _twitchService = twitchService;
         _logger = logger;
-        _recordingPath = Environment.GetEnvironmentVariable("RECORDING_PATH") ?? string.Empty;
+        
+        var envPath = Environment.GetEnvironmentVariable("RECORDING_PATH");
+        var defaultContainerPath = "/recordings";
+
+        // Heuristic to detect if a host path (like Synology /volume1) was passed instead of container path
+        if (!string.IsNullOrEmpty(envPath) && envPath.StartsWith("/volume", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("⚠️ Potential path mismatch: RECORDING_PATH is set to '{Path}', which looks like a host path. " +
+                "Inside the container, you should typically use '{Default}'.", envPath, defaultContainerPath);
+        }
+
+        // Use environment variable if provided, otherwise default to /recordings if it exists
+        if (!string.IsNullOrEmpty(envPath))
+        {
+            _recordingPath = envPath;
+        }
+        else if (Directory.Exists(defaultContainerPath))
+        {
+            _recordingPath = defaultContainerPath;
+            _logger.LogInformation("ℹ️ RECORDING_PATH not set, defaulting to '{Path}'", _recordingPath);
+        }
+        else
+        {
+            _recordingPath = string.Empty;
+        }
         
         if (!int.TryParse(Environment.GetEnvironmentVariable("RECORDING_RETENTION_DAYS"), out _retentionDays))
         {

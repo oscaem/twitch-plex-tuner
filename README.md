@@ -38,8 +38,11 @@ recording:
 CLIENT_ID=your_twitch_client_id
 CLIENT_SECRET=your_twitch_client_secret
 SUBSCRIPTIONS_PATH=./subscriptions.yaml
-RECORDING_PATH=/volume1/Media/Twitch
+RECORDING_PATH=/recordings          # Use the container path here!
 ```
+
+> [!CAUTION]
+> **RECORDING_PATH** must match the **internal container path** defined in your volumes (e.g., `/recordings`). Do NOT use the host path (like `/volume1/...`) in the environment variable. If you do, files will be saved inside the container and lost when it restarts.
 
 ### 2. Create `compose.yaml`
 
@@ -157,7 +160,7 @@ Channels **not** in this list are tracked/viewable but **not** recorded.
 | `CLIENT_SECRET` | required | Twitch API Client Secret |
 | `BASE_URL` | `http://localhost:5000` | Public URL for M3U/XMLTV |
 | `STREAM_QUALITY` | `1080p60,1080p,720p60,720p,best` | Quality preference |
-| `RECORDING_PATH` | *(disabled)* | Path to save recordings |
+| `RECORDING_PATH` | *(disabled)* | Internal container path to save recordings (e.g. `/recordings`) |
 | `RECORDING_RETENTION_DAYS` | `30` | Days to keep recordings before deletion |
 | `GUIDE_UPDATE_MINUTES` | `5` | How often to refresh Twitch stream status |
 
