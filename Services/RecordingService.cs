@@ -19,6 +19,7 @@ namespace TwitchPlexTuner.Services;
 public class RecordingService : BackgroundService
 {
     private readonly TwitchService _twitchService;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<RecordingService> _logger;
     private readonly string _recordingPath;
     private readonly int _retentionDays;
@@ -29,10 +30,11 @@ public class RecordingService : BackgroundService
     // Track active recordings to avoid duplicates
     private readonly ConcurrentDictionary<string, RecordingInfo> _activeRecordings = new();
 
-    public RecordingService(TwitchService twitchService, ILogger<RecordingService> logger)
+    public RecordingService(TwitchService twitchService, ILogger<RecordingService> logger, IHttpClientFactory httpClientFactory)
     {
         _twitchService = twitchService;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
         
         var envPath = Environment.GetEnvironmentVariable("RECORDING_PATH");
         var defaultContainerPath = "/recordings";
@@ -220,6 +222,27 @@ public class RecordingService : BackgroundService
             // Create output directory per channel
             var channelDir = Path.Combine(_recordingPath, SanitizeFilename(channel.DisplayName));
             Directory.CreateDirectory(channelDir);
+
+            // Save profile picture as Jellyfin cover photo (folder.jpg)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var coverPath = Path.Combine(channelDir, "folder.jpg");
+                    if (!File.Exists(coverPath) && !string.IsNullOrEmpty(channel.ProfileImageUrl))
+                    {
+                        _logger.LogInformation("📸 [{Login}] Downloading profile picture for cover: {Url}", channel.Login, channel.ProfileImageUrl);
+                        using var client = _httpClientFactory.CreateClient();
+                        var imageBytes = await client.GetByteArrayAsync(channel.ProfileImageUrl);
+                        await File.WriteAllBytesAsync(coverPath, imageBytes);
+                        _logger.LogInformation("✅ [{Login}] Saved cover photo to {Path}", channel.Login, coverPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ [{Login}] Failed to download profile picture", channel.Login);
+                }
+            });
 
             // Generate filename: {Channel} - {Date} - {Title}.ts
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm");
