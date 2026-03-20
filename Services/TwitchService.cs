@@ -57,16 +57,35 @@ public class TwitchService
             if (channelDict == null || !channelDict.Any()) return;
 
             // Parse optional recording list
-            var recordingLogins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var recordingSettings = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
             if (root.ContainsKey("recording") && root["recording"] is List<object> recordingList)
             {
                 foreach (var item in recordingList)
                 {
-                    var login = item.ToString()?.Trim().ToLower();
-                    if (!string.IsNullOrEmpty(login))
-                        recordingLogins.Add(login);
+                    if (item is string loginStr)
+                    {
+                        var login = loginStr.Trim().ToLower();
+                        if (!string.IsNullOrEmpty(login))
+                            recordingSettings[login] = null;
+                    }
+                    else if (item is Dictionary<object, object> dict && dict.Count > 0)
+                    {
+                        var login = dict.Keys.First().ToString()?.Trim().ToLower();
+                        if (!string.IsNullOrEmpty(login))
+                        {
+                            int? retention = null;
+                            if (dict.Values.First() is Dictionary<object, object> props)
+                            {
+                                if (props.TryGetValue("retention_days", out var retVal) && int.TryParse(retVal.ToString(), out var parsedRet))
+                                {
+                                    retention = parsedRet;
+                                }
+                            }
+                            recordingSettings[login] = retention;
+                        }
+                    }
                 }
-                Console.WriteLine($"Recording enabled for {recordingLogins.Count} channel(s): {string.Join(", ", recordingLogins)}");
+                Console.WriteLine($"Recording enabled for {recordingSettings.Count} channel(s): {string.Join(", ", recordingSettings.Keys)}");
             }
 
             var newChannels = new List<ChannelInfo>();
@@ -80,7 +99,8 @@ public class TwitchService
                     Login = login,
                     DisplayName = kvp.Key,
                     ProfileImageUrl = $"https://static-cdn.jtvnw.net/jtv_user_pictures/{login}-profile_image-300x300.png",
-                    RecordEnabled = recordingLogins.Contains(login)
+                    RecordEnabled = recordingSettings.ContainsKey(login),
+                    RetentionDays = recordingSettings.ContainsKey(login) ? recordingSettings[login] : null
                 });
             }
 

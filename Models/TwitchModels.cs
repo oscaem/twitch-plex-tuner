@@ -84,4 +84,5 @@ public class ChannelInfo
     public DateTime? StartedAt { get; set; }
     public string? StreamId { get; set; }  // Used for cache invalidation
     public bool RecordEnabled { get; set; } // Whether this channel should be recorded
+    public int? RetentionDays { get; set; } // Custom retention limit specific to this channel
 }
