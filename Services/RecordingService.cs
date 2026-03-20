@@ -29,6 +29,9 @@ public class RecordingService : BackgroundService
     
     // Track active recordings to avoid duplicates
     private readonly ConcurrentDictionary<string, RecordingInfo> _activeRecordings = new();
+    
+    // Ensure only one file is remuxed at a time to keep CPU/IO load calm
+    private readonly SemaphoreSlim _remuxSemaphore = new(1, 1);
 
     public RecordingService(TwitchService twitchService, ILogger<RecordingService> logger, IHttpClientFactory httpClientFactory)
     {
@@ -221,7 +224,8 @@ public class RecordingService : BackgroundService
         {
             // Create output directory per channel
             var channelDir = Path.Combine(_recordingPath, SanitizeFilename(channel.DisplayName));
-            Directory.CreateDirectory(channelDir);
+            var seasonDir = Path.Combine(channelDir, "Season Recordings");
+            Directory.CreateDirectory(seasonDir);
 
             // Save profile picture as Jellyfin cover photo (folder.jpg)
             _ = Task.Run(async () =>
@@ -250,7 +254,7 @@ public class RecordingService : BackgroundService
             if (title.Length > 50) title = title[..50];
             
             var filename = $"{channel.DisplayName} - {timestamp} - {title}.ts";
-            var outputPath = Path.Combine(channelDir, filename);
+            var outputPath = Path.Combine(seasonDir, filename);
 
             var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "best";
             
@@ -329,6 +333,9 @@ public class RecordingService : BackgroundService
                         _logger.LogWarning("⚠️ [{Login}] Recording process exited with code {ExitCode}. File: {Path} ({Size:F1}MB)",
                             channel.Login, exitCode, outputPath, fileSize);
                     }
+                    
+                    // Trigger remux asynchronously
+                    _ = RemuxToMp4Async(outputPath, channel.Login);
                 }
                 catch { }
             }, CancellationToken.None);
@@ -464,6 +471,75 @@ public class RecordingService : BackgroundService
 
     /// <summary>Get count of active recordings.</summary>
     public int ActiveRecordingCount => _activeRecordings.Count;
+
+    private async Task RemuxToMp4Async(string tsPath, string login)
+    {
+        if (string.IsNullOrEmpty(tsPath) || !File.Exists(tsPath)) return;
+
+        var fileSizeMB = GetFileSizeMB(tsPath);
+        if (fileSizeMB < 1.0)
+        {
+            _logger.LogDebug("🗑 [{Login}] File too small to remux ({Size:F1}MB), ignoring: {Path}", login, fileSizeMB, tsPath);
+            return;
+        }
+
+        var mp4Path = Path.ChangeExtension(tsPath, ".mp4");
+
+        try
+        {
+            _logger.LogInformation("⏳ [{Login}] Queued for remuxing: {Path}", login, tsPath);
+            await _remuxSemaphore.WaitAsync();
+
+            if (!File.Exists(tsPath)) return; // Double check in case it was deleted while waiting
+
+            _logger.LogInformation("🔄 [{Login}] Starting remux to mp4: {Path}", login, mp4Path);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "ffmpeg",
+                Arguments = $"-y -i \"{tsPath}\" -c copy \"{mp4Path}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            var process = new Process { StartInfo = psi };
+            if (!process.Start())
+            {
+                _logger.LogError("❌ [{Login}] Failed to start ffmpeg process for remuxing.", login);
+                return;
+            }
+
+            // Lower priority for "calm" CPU usage, if supported by the OS/container
+            try
+            {
+                process.PriorityClass = ProcessPriorityClass.BelowNormal;
+            }
+            catch { /* Ignore if unauthorized or unsupported */ }
+
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode == 0 && File.Exists(mp4Path) && GetFileSizeMB(mp4Path) > 0)
+            {
+                _logger.LogInformation("✅ [{Login}] Successfully remuxed to {Path}. Deleting original .ts.", login, mp4Path);
+                File.Delete(tsPath);
+            }
+            else
+            {
+                var stderr = await process.StandardError.ReadToEndAsync();
+                _logger.LogWarning("⚠️ [{Login}] Remux failed with code {Code}. Stderr: {Error}", login, process.ExitCode, stderr);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [{Login}] Error during remuxing to mp4: {Message}", login, ex.Message);
+        }
+        finally
+        {
+            _remuxSemaphore.Release();
+        }
+    }
 
     private record RecordingInfo(Process Process, string OutputPath, DateTime StartedAt, string StreamTitle);
 }
