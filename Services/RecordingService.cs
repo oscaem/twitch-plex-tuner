@@ -221,8 +221,7 @@ public class RecordingService : BackgroundService
         {
             // Create output directory per channel
             var channelDir = Path.Combine(_recordingPath, SanitizeFilename(channel.DisplayName));
-            var seasonDir = Path.Combine(channelDir, "Season Recordings");
-            Directory.CreateDirectory(seasonDir);
+            Directory.CreateDirectory(channelDir);
 
             // Save profile picture as Jellyfin cover photo (folder.jpg)
             _ = Task.Run(async () =>
@@ -251,7 +250,7 @@ public class RecordingService : BackgroundService
             if (title.Length > 50) title = title[..50];
             
             var filename = $"{channel.DisplayName} - {timestamp} - {title}.ts";
-            var outputPath = Path.Combine(seasonDir, filename);
+            var outputPath = Path.Combine(channelDir, filename);
 
             var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "best";
             
@@ -330,11 +329,6 @@ public class RecordingService : BackgroundService
                         _logger.LogWarning("⚠️ [{Login}] Recording process exited with code {ExitCode}. File: {Path} ({Size:F1}MB)",
                             channel.Login, exitCode, outputPath, fileSize);
                     }
-                    
-                    if (fileSize > 0)
-                    {
-                        _ = RemuxRecordingAsync(channel, outputPath);
-                    }
                 }
                 catch { }
             }, CancellationToken.None);
@@ -390,30 +384,17 @@ public class RecordingService : BackgroundService
         {
             if (!Directory.Exists(_recordingPath)) return;
 
+            var cutoff = DateTime.Now.AddDays(-_retentionDays);
             var files = Directory.GetFiles(_recordingPath, "*.*", SearchOption.AllDirectories);
             var deletedCount = 0;
             var totalFreedMB = 0.0;
-            var channels = _twitchService.GetChannels().ToDictionary(c => SanitizeFilename(c.DisplayName), StringComparer.OrdinalIgnoreCase);
 
-            _logger.LogInformation("🧹 Running recording cleanup (default retention: {Days} days)", _retentionDays);
+            _logger.LogInformation("🧹 Running recording cleanup (retention: {Days} days, cutoff: {Cutoff:yyyy-MM-dd HH:mm})",
+                _retentionDays, cutoff);
 
             foreach (var file in files)
             {
                 var fi = new FileInfo(file);
-                if (fi.Name.Equals("folder.jpg", StringComparison.OrdinalIgnoreCase)) continue;
-
-                var relPath = Path.GetRelativePath(_recordingPath, file);
-                var parts = relPath.Split(Path.DirectorySeparatorChar);
-                var channelDirName = parts.Length > 0 ? parts[0] : "";
-                
-                var channelRetention = _retentionDays;
-                if (!string.IsNullOrEmpty(channelDirName) && channels.TryGetValue(channelDirName, out var channelInfo) && channelInfo.RetentionDays.HasValue)
-                {
-                    channelRetention = channelInfo.RetentionDays.Value;
-                }
-
-                var cutoff = DateTime.Now.AddDays(-channelRetention);
-
                 if (fi.CreationTime < cutoff)
                 {
                     try
@@ -483,56 +464,6 @@ public class RecordingService : BackgroundService
 
     /// <summary>Get count of active recordings.</summary>
     public int ActiveRecordingCount => _activeRecordings.Count;
-
-    private async Task RemuxRecordingAsync(ChannelInfo channel, string tsPath)
-    {
-        if (!File.Exists(tsPath)) return;
-        
-        var mp4Path = Path.ChangeExtension(tsPath, ".mp4");
-        _logger.LogInformation("🎬 [{Login}] Starting calm post-recording remux to {Path}", channel.Login, mp4Path);
-
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "nice",
-                Arguments = $"-n 19 ffmpeg -y -i \"{tsPath}\" -c copy \"{mp4Path}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            var process = new Process { StartInfo = psi };
-            if (!process.Start())
-            {
-                _logger.LogWarning("⚠️ [{Login}] Failed to start ffmpeg remux process", channel.Login);
-                return;
-            }
-
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode == 0 && File.Exists(mp4Path))
-            {
-                var originalSize = GetFileSizeMB(tsPath);
-                var newSize = GetFileSizeMB(mp4Path);
-                _logger.LogInformation("✅ [{Login}] Remux successful ({OldSize:F1}MB -> {NewSize:F1}MB). Deleting original .ts file.", 
-                    channel.Login, originalSize, newSize);
-                
-                try { File.Delete(tsPath); } catch { /* ignore */ }
-            }
-            else
-            {
-                var error = await process.StandardError.ReadToEndAsync();
-                _logger.LogWarning("⚠️ [{Login}] Remux failed with exit code {Code}. Error: {Error}", 
-                    channel.Login, process.ExitCode, error);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ [{Login}] Exception during remuxing", channel.Login);
-        }
-    }
 
     private record RecordingInfo(Process Process, string OutputPath, DateTime StartedAt, string StreamTitle);
 }
