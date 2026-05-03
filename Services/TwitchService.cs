@@ -17,16 +17,36 @@ public class TwitchService
 {
     private readonly TwitchConfig _config;
     private List<ChannelInfo> _channels = new();
+    private readonly SemaphoreSlim _updateSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
+    private string? _accessToken;
+    private DateTime _accessTokenExpiresAt = DateTime.MinValue;
+    private DateTime _lastUpdatedUtc = DateTime.MinValue;
 
     public TwitchService(IOptions<TwitchConfig> config)
     {
         _config = config.Value;
     }
 
+    public virtual async Task EnsureChannelsFreshAsync(TimeSpan maxAge)
+    {
+        if (DateTime.UtcNow - _lastUpdatedUtc < maxAge) return;
+
+        await UpdateChannelsAsync();
+    }
+
     public virtual async Task UpdateChannelsAsync()
     {
+        await _updateSemaphore.WaitAsync();
+
         try
         {
+            if (DateTime.UtcNow - _lastUpdatedUtc < TimeSpan.FromSeconds(15))
+            {
+                Console.WriteLine("Skipping Twitch update because a refresh just completed.");
+                return;
+            }
+
             Console.WriteLine($"=== LOADING CHANNELS FROM YAML ===");
             
             // 1. Load basic channel list from YAML
@@ -90,15 +110,11 @@ public class TwitchService
                 try 
                 {
                     Console.WriteLine("Fetching live data from Twitch API...");
-                    var tokenResp = await "https://id.twitch.tv/oauth2/token"
-                        .PostUrlEncodedAsync(new {
-                            client_id = _config.ClientId,
-                            client_secret = _config.ClientSecret,
-                            grant_type = "client_credentials"
-                        })
-                        .ReceiveJson<TwitchTokenResponse>();
-
-                    string accessToken = tokenResp.AccessToken;
+                    string? accessToken = await GetAccessTokenAsync();
+                    if (string.IsNullOrEmpty(accessToken))
+                    {
+                        Console.WriteLine("Unable to fetch Twitch access token.");
+                    }
                     
                     // Split into chunks of 100 (API limit)
                     var chunks = newChannels.Select((x, i) => new { Index = i, Value = x })
@@ -108,6 +124,8 @@ public class TwitchService
 
                     foreach (var chunk in chunks)
                     {
+                        if (string.IsNullOrEmpty(accessToken)) break;
+
                         var userLogins = chunk.Select(c => c.Login).ToList();
                         
                         // Get Users (for real Profile Image)
@@ -161,13 +179,51 @@ public class TwitchService
             }
 
             _channels = newChannels;
+            _lastUpdatedUtc = DateTime.UtcNow;
             Console.WriteLine($"=== LOADED {_channels.Count} CHANNELS (API: {(!string.IsNullOrEmpty(_config.ClientId) ? "Yes" : "No")}) ===");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"ERROR in UpdateChannelsAsync: {ex.Message}");
         }
+        finally
+        {
+            _updateSemaphore.Release();
+        }
     }
 
     public virtual List<ChannelInfo> GetChannels() => _channels;
+
+    private async Task<string?> GetAccessTokenAsync()
+    {
+        if (!string.IsNullOrEmpty(_accessToken) && DateTime.UtcNow < _accessTokenExpiresAt)
+        {
+            return _accessToken;
+        }
+
+        await _tokenSemaphore.WaitAsync();
+        try
+        {
+            if (!string.IsNullOrEmpty(_accessToken) && DateTime.UtcNow < _accessTokenExpiresAt)
+            {
+                return _accessToken;
+            }
+
+            var tokenResp = await "https://id.twitch.tv/oauth2/token"
+                .PostUrlEncodedAsync(new {
+                    client_id = _config.ClientId,
+                    client_secret = _config.ClientSecret,
+                    grant_type = "client_credentials"
+                })
+                .ReceiveJson<TwitchTokenResponse>();
+
+            _accessToken = tokenResp.AccessToken;
+            _accessTokenExpiresAt = DateTime.UtcNow.AddSeconds(Math.Max(60, tokenResp.ExpiresIn - 300));
+            return _accessToken;
+        }
+        finally
+        {
+            _tokenSemaphore.Release();
+        }
+    }
 }

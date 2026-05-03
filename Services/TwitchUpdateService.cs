@@ -25,9 +25,15 @@ public class TwitchUpdateService : BackgroundService
         _recordingService = recordingService;
         _logger = logger;
         
-        if (!int.TryParse(Environment.GetEnvironmentVariable("GUIDE_UPDATE_MINUTES"), out _updateMinutes) || _updateMinutes < 1)
+        if (!int.TryParse(Environment.GetEnvironmentVariable("GUIDE_UPDATE_MINUTES"), out _updateMinutes))
         {
-            _updateMinutes = 5; // Default to 5 minutes
+            _updateMinutes = 2; // Default to 2 minutes
+        }
+        else if (_updateMinutes < 2)
+        {
+            _logger.LogWarning("GUIDE_UPDATE_MINUTES={Minutes} is too aggressive; using 2 minutes to avoid hammering Twitch/Jellyfin.",
+                _updateMinutes);
+            _updateMinutes = 2;
         }
         
         _logger.LogInformation("Guide update interval: {Minutes} minutes", _updateMinutes);

@@ -17,6 +17,7 @@ builder.Services.Configure<TwitchConfig>(options =>
     options.JellyfinApiKey = Environment.GetEnvironmentVariable("JELLYFIN_API_KEY") ?? string.Empty;
     options.StreamEngine = Environment.GetEnvironmentVariable("STREAM_ENGINE") ?? "streamlink";
     options.FFmpegArgs = Environment.GetEnvironmentVariable("FFMPEG_ARGS") ?? string.Empty;
+    options.TwitchOAuthToken = Environment.GetEnvironmentVariable("TWITCH_OAUTH_TOKEN") ?? string.Empty;
 });
 
 // Add services

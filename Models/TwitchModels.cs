@@ -18,6 +18,7 @@ public class TwitchConfig
     public string JellyfinApiKey { get; set; } = string.Empty;
     public string StreamEngine { get; set; } = "streamlink";
     public string FFmpegArgs { get; set; } = string.Empty;
+    public string TwitchOAuthToken { get; set; } = string.Empty;
 }
 
 public class TwitchUser

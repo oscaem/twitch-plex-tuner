@@ -136,6 +136,7 @@ Recording uses **streamlink** (separate from the live streaming pipeline) and on
 - Checks for live channels every 2 minutes
 - Saves to: `{RECORDING_PATH}/{DisplayName}/{timestamp} - {title}.ts`
 - Stops recording when stream ends
+- Keeps recordings as `.ts`; no MP4 remux/conversion is performed
 - Files organized by streamer name
 - **Retention**: Old recordings are deleted after `RECORDING_RETENTION_DAYS` (default 30 days)
 
@@ -160,9 +161,16 @@ Channels **not** in this list are tracked/viewable but **not** recorded.
 | `CLIENT_SECRET` | required | Twitch API Client Secret |
 | `BASE_URL` | `http://localhost:5000` | Public URL for M3U/XMLTV |
 | `STREAM_QUALITY` | `1080p60,1080p,720p60,720p,best` | Quality preference |
+| `TWITCH_OAUTH_TOKEN` | *(empty)* | Optional Twitch website auth token for Streamlink. Useful when the account has Twitch Turbo or a channel subscription that Twitch honors for ad-free playback. Keep this secret. |
 | `RECORDING_PATH` | *(disabled)* | Internal container path to save recordings (e.g. `/recordings`) |
 | `RECORDING_RETENTION_DAYS` | `30` | Days to keep recordings before deletion |
-| `GUIDE_UPDATE_MINUTES` | `5` | How often to refresh Twitch stream status |
+| `GUIDE_UPDATE_MINUTES` | `2` | How often to refresh Twitch stream status and trigger Jellyfin guide refresh. Values below 2 are clamped to 2 minutes to avoid hammering Twitch/Jellyfin. |
+
+### Twitch Ads
+
+The app asks Streamlink to filter Twitch embedded ads for both live playback and recordings. On recent Streamlink releases, this filtering is automatic; the old `--twitch-disable-ads` option is still included for older versions.
+
+Filtering does **not** recover the hidden live content. During Twitch preroll or midroll ads, Streamlink pauses output until regular content returns, which can show up as a gap or time skip in a live view or recording. Fully preventing ads depends on Twitch returning an ad-free stream to the account, for example Twitch Turbo or a subscribed channel. You can pass that account's Twitch website OAuth token with `TWITCH_OAUTH_TOKEN`.
 
 ---
 
@@ -182,7 +190,7 @@ Use `./scripts/rebuild.sh` instead of Container Manager UI.
 3. View logs for recording errors
 
 ### Guide shows wrong status
-Guide updates every `GUIDE_UPDATE_MINUTES` (default 5). Jellyfin re-fetches M3U/XMLTV automatically; ensure your Jellyfin Live TV guide refresh is set to match. For Plex: Settings → Live TV → Refresh Guide.
+Guide updates every `GUIDE_UPDATE_MINUTES` (default 2). Jellyfin re-fetches M3U/XMLTV automatically; ensure your Jellyfin Live TV guide refresh is set to match. Playlist/EPG requests also opportunistically refresh Twitch status when the cached state is older than 2 minutes. For Plex: Settings → Live TV → Refresh Guide.
 
 ---
 

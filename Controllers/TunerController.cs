@@ -6,6 +6,7 @@ namespace TwitchPlexTuner.Controllers;
 [ApiController]
 public class TunerController : ControllerBase
 {
+    private static readonly TimeSpan TunerRequestRefreshAge = TimeSpan.FromMinutes(2);
     private readonly TunerService _tunerService;
     private readonly TwitchService _twitchService;
 
@@ -18,24 +19,33 @@ public class TunerController : ControllerBase
     [HttpGet("discover.json")]
     public IActionResult Discover()
     {
+        SetNoCacheHeaders();
         // Use configured BaseUrl if set, otherwise fallback to request host
         return Ok(_tunerService.GetDiscover());
     }
 
     [HttpGet("lineup_status.json")]
-    public IActionResult LineupStatus() => Ok(new { ScanInProgress = 0, ScanPossible = 1, Source = "Cable", SourceList = new[] { "Cable" } });
+    public IActionResult LineupStatus()
+    {
+        SetNoCacheHeaders();
+        return Ok(new { ScanInProgress = 0, ScanPossible = 1, Source = "Cable", SourceList = new[] { "Cable" } });
+    }
 
     [HttpGet("lineup.json")]
-    public IActionResult Lineup()
+    public async Task<IActionResult> Lineup()
     {
+        SetNoCacheHeaders();
+        await _twitchService.EnsureChannelsFreshAsync(TunerRequestRefreshAge);
         return Ok(_tunerService.GetLineup());
     }
 
     [HttpGet("playlist.m3u")]
-    public IActionResult Playlist()
+    public async Task<IActionResult> Playlist()
     {
         try
         {
+            SetNoCacheHeaders();
+            await _twitchService.EnsureChannelsFreshAsync(TunerRequestRefreshAge);
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
             return Content(_tunerService.GetM3U(baseUrl), "text/plain");
         }
@@ -47,10 +57,12 @@ public class TunerController : ControllerBase
     }
 
     [HttpGet("epg.xml")]
-    public IActionResult Epg()
+    public async Task<IActionResult> Epg()
     {
         try
         {
+            SetNoCacheHeaders();
+            await _twitchService.EnsureChannelsFreshAsync(TunerRequestRefreshAge);
             return Content(_tunerService.GetXMLTV(), "text/xml");
         }
         catch (Exception ex)
@@ -63,7 +75,15 @@ public class TunerController : ControllerBase
     [HttpGet("update")]
     public async Task<IActionResult> Update()
     {
+        SetNoCacheHeaders();
         await _twitchService.UpdateChannelsAsync();
         return Ok("Updated");
+    }
+
+    private void SetNoCacheHeaders()
+    {
+        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
+        Response.Headers["Pragma"] = "no-cache";
+        Response.Headers["Expires"] = "0";
     }
 }

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using TwitchPlexTuner.Models;
+using TwitchPlexTuner.Services;
 
 namespace TwitchPlexTuner.Controllers;
 
@@ -81,13 +82,22 @@ public class StreamController : ControllerBase
         var slPsi = new ProcessStartInfo
         {
             FileName = "streamlink",
-            // Start with ringbuffer-size and threads setup for fast startup.
-            Arguments = $"--twitch-disable-ads --stream-segment-threads 4 --stream-segment-attempts 5 --ringbuffer-size 32M --stdout \"{url}\" {quality}",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        StreamlinkArguments.AddTwitchAdFiltering(slPsi);
+        StreamlinkArguments.AddTwitchOAuthHeader(slPsi, _config.TwitchOAuthToken);
+        slPsi.ArgumentList.Add("--stream-segment-threads");
+        slPsi.ArgumentList.Add("4");
+        slPsi.ArgumentList.Add("--stream-segment-attempts");
+        slPsi.ArgumentList.Add("5");
+        slPsi.ArgumentList.Add("--ringbuffer-size");
+        slPsi.ArgumentList.Add("32M");
+        slPsi.ArgumentList.Add("--stdout");
+        slPsi.ArgumentList.Add(url);
+        slPsi.ArgumentList.Add(quality);
 
         using var slProcess = new Process { StartInfo = slPsi };
         Process? ffmpegProcess = null;
@@ -210,12 +220,16 @@ public class StreamController : ControllerBase
         var psi = new ProcessStartInfo
         {
             FileName = "streamlink",
-            Arguments = $"{url} {quality} --stream-url --twitch-disable-ads",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        StreamlinkArguments.AddTwitchAdFiltering(psi);
+        StreamlinkArguments.AddTwitchOAuthHeader(psi, _config.TwitchOAuthToken);
+        psi.ArgumentList.Add("--stream-url");
+        psi.ArgumentList.Add(url);
+        psi.ArgumentList.Add(quality);
 
         using var process = new Process { StartInfo = psi };
         process.Start();
