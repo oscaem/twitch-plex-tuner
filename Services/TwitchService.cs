@@ -17,6 +17,7 @@ public class TwitchService
 {
     private readonly TwitchConfig _config;
     private List<ChannelInfo> _channels = new();
+    private List<PassiveRecordEntry> _passiveRecordEntries = new();
     private readonly SemaphoreSlim _updateSemaphore = new(1, 1);
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private string? _accessToken;
@@ -74,7 +75,9 @@ public class TwitchService
                 }
             }
 
-            if (channelDict == null || !channelDict.Any()) return;
+            var passiveRecordEntries = ParsePassiveRecordEntries(root);
+            _passiveRecordEntries = passiveRecordEntries;
+            if ((channelDict == null || !channelDict.Any()) && !passiveRecordEntries.Any()) return;
 
             // Parse optional recording list
             var recordingLogins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -90,7 +93,7 @@ public class TwitchService
             }
 
             var newChannels = new List<ChannelInfo>();
-            foreach (var kvp in channelDict)
+            foreach (var kvp in channelDict ?? new Dictionary<string, string>())
             {
                 var login = kvp.Value.Split('/').Last().ToLower();
                 if (string.IsNullOrEmpty(login)) continue;
@@ -193,6 +196,95 @@ public class TwitchService
     }
 
     public virtual List<ChannelInfo> GetChannels() => _channels;
+
+    public virtual List<PassiveRecordEntry> GetPassiveRecordEntries() => _passiveRecordEntries;
+
+    public async Task<List<TwitchVideo>> GetAvailableVideosAsync(string login, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_config.ClientId) || string.IsNullOrWhiteSpace(_config.ClientSecret))
+            throw new InvalidOperationException("Twitch API credentials are required for passive recording.");
+
+        var accessToken = await GetAccessTokenAsync();
+        if (string.IsNullOrWhiteSpace(accessToken))
+            throw new InvalidOperationException("Unable to obtain a Twitch API access token.");
+
+        var users = await "https://api.twitch.tv/helix/users"
+            .WithHeader("Client-ID", _config.ClientId)
+            .WithHeader("Authorization", $"Bearer {accessToken}")
+            .SetQueryParam("login", login)
+            .GetJsonAsync<TwitchResponse<TwitchUser>>(cancellationToken: ct);
+        var userId = users.Data.FirstOrDefault()?.Id;
+        if (string.IsNullOrEmpty(userId))
+            throw new InvalidOperationException($"Twitch user '{login}' was not found.");
+
+        var videos = new List<TwitchVideo>();
+        string? cursor = null;
+        do
+        {
+            var request = "https://api.twitch.tv/helix/videos"
+                .WithHeader("Client-ID", _config.ClientId)
+                .WithHeader("Authorization", $"Bearer {accessToken}")
+                .SetQueryParam("user_id", userId)
+                .SetQueryParam("type", "archive")
+                .SetQueryParam("period", "all")
+                .SetQueryParam("first", 100);
+            if (!string.IsNullOrEmpty(cursor))
+                request = request.SetQueryParam("after", cursor);
+
+            var page = await request.GetJsonAsync<TwitchVideosResponse>(cancellationToken: ct);
+            videos.AddRange(page.Data);
+            cursor = page.Pagination.Cursor;
+        }
+        while (!string.IsNullOrEmpty(cursor));
+
+        return videos;
+    }
+
+    private static List<PassiveRecordEntry> ParsePassiveRecordEntries(Dictionary<string, object> root)
+    {
+        var entries = new List<PassiveRecordEntry>();
+        if (!root.TryGetValue("passive_record", out var section) || section is not List<object> rawEntries)
+            return entries;
+
+        foreach (var rawEntry in rawEntries)
+        {
+            if (rawEntry is not Dictionary<object, object> fields)
+                continue;
+
+            string GetField(string name) =>
+                fields.FirstOrDefault(field =>
+                    string.Equals(field.Key.ToString(), name, StringComparison.OrdinalIgnoreCase))
+                    .Value?.ToString()?.Trim() ?? string.Empty;
+
+            var name = GetField("name");
+            var url = GetField("url");
+            if (string.IsNullOrWhiteSpace(name) || !Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                !uri.Host.Equals("twitch.tv", StringComparison.OrdinalIgnoreCase) &&
+                !uri.Host.Equals("www.twitch.tv", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"Skipping invalid passive_record entry (name: '{name}', url: '{url}'). A name and Twitch channel URL are required.");
+                continue;
+            }
+
+            var login = uri.AbsolutePath.Trim('/').Split('/').LastOrDefault()?.ToLowerInvariant() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(login))
+            {
+                Console.WriteLine($"Skipping passive_record entry '{name}': Twitch channel URL has no channel name.");
+                continue;
+            }
+
+            var group = GetField("group");
+            entries.Add(new PassiveRecordEntry
+            {
+                Name = name,
+                Url = url,
+                Login = login,
+                Group = string.IsNullOrWhiteSpace(group) ? null : group
+            });
+        }
+
+        return entries;
+    }
 
     private async Task<string?> GetAccessTokenAsync()
     {

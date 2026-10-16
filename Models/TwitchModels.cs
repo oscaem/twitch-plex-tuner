@@ -63,6 +63,40 @@ public class TwitchResponse<T>
     public List<T> Data { get; set; } = new();
 }
 
+public class TwitchVideosResponse
+{
+    [JsonPropertyName("data")]
+    public List<TwitchVideo> Data { get; set; } = new();
+    [JsonPropertyName("pagination")]
+    public TwitchPagination Pagination { get; set; } = new();
+}
+
+public class TwitchPagination
+{
+    [JsonPropertyName("cursor")]
+    public string? Cursor { get; set; }
+}
+
+public class TwitchVideo
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+    [JsonPropertyName("created_at")]
+    public DateTime CreatedAt { get; set; }
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = string.Empty;
+}
+
+public class PassiveRecordEntry
+{
+    public string Name { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public string? Group { get; set; }
+    public string Login { get; set; } = string.Empty;
+}
+
 public class TwitchTokenResponse
 {
     [JsonPropertyName("access_token")]

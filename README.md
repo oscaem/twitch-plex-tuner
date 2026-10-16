@@ -31,6 +31,12 @@ twitch_recorder:
 recording:
   - edelive
   - nils
+
+# Optional: archive-only backfill, never exposed in the tuner playlist
+passive_record:
+  - name: "Example Streamer"
+    url: "https://www.twitch.tv/example"
+    group: "Example Group" # Optional; stores as Example Group/Example Streamer
 ```
 
 **`.env`** (create this file):
@@ -150,6 +156,19 @@ recording:
 Channels **not** in this list are tracked/viewable but **not** recorded.
 
 **To disable all recording**: Remove the `RECORDING_PATH` environment variable.
+
+### Passive VOD Backfill
+
+Use the optional `passive_record:` list to backfill all archive VODs Twitch currently makes available for each channel (typically the last one to two months). These entries are recording-only and are not added to the live tuner, M3U playlist, or guide. Each entry requires a display `name` and Twitch channel `url`; `group` is optional:
+
+```yaml
+passive_record:
+  - name: "Example Streamer"
+    url: "https://www.twitch.tv/example"
+    group: "Example Group"
+```
+
+Passive VODs are copied with Streamlink without transcoding, one download at a time, with one segment thread and below-normal process priority so regular live recordings take precedence. Completed files are saved as `{RECORDING_PATH}/{name}/...`; when `group` is set, they are saved under `{RECORDING_PATH}/{group}/{name}/...`. Twitch API credentials and `RECORDING_PATH` are required.
 
 ---
 

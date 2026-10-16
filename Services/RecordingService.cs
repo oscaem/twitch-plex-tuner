@@ -30,6 +30,7 @@ public class RecordingService : BackgroundService
     
     // Track active recordings to avoid duplicates
     private readonly ConcurrentDictionary<string, RecordingInfo> _activeRecordings = new();
+    private PassiveRecordingInfo? _activePassiveRecording;
     
     public RecordingService(TwitchService twitchService, ILogger<RecordingService> logger, IHttpClientFactory httpClientFactory, IOptions<TwitchConfig> config)
     {
@@ -141,6 +142,7 @@ public class RecordingService : BackgroundService
         {
             StopRecording(kvp.Key, "service shutdown");
         }
+        StopPassiveRecording("service shutdown");
         _logger.LogInformation("Recording service stopped.");
     }
 
@@ -214,7 +216,188 @@ public class RecordingService : BackgroundService
             _logger.LogInformation("📹 Active recordings: {Recordings}", string.Join(" | ", summary));
         }
 
-        await Task.CompletedTask;
+        await SyncPassiveRecordingsAsync(ct);
+    }
+
+    private async Task SyncPassiveRecordingsAsync(CancellationToken ct)
+    {
+        CompletePassiveRecordingIfExited();
+        if (_activePassiveRecording != null)
+            return;
+
+        var entries = _twitchService.GetPassiveRecordEntries();
+        if (entries.Count == 0)
+            return;
+
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            List<TwitchVideo> videos;
+            try
+            {
+                videos = await _twitchService.GetAvailableVideosAsync(entry.Login, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Unable to check recent Twitch VODs for passive recording entry {Name}", entry.Name);
+                continue;
+            }
+
+            foreach (var video in videos.OrderBy(video => video.CreatedAt))
+            {
+                var outputPath = GetPassiveRecordingPath(entry, video);
+                if (File.Exists(outputPath))
+                    continue;
+                if (File.Exists(outputPath + ".partial"))
+                {
+                    _logger.LogWarning("Removing incomplete passive VOD download before retry: {Path}", outputPath + ".partial");
+                    File.Delete(outputPath + ".partial");
+                }
+
+                StartPassiveRecording(entry, video, outputPath);
+                return;
+            }
+        }
+    }
+
+    private string GetPassiveRecordingPath(PassiveRecordEntry entry, TwitchVideo video)
+    {
+        var streamerDirectory = string.IsNullOrWhiteSpace(entry.Group)
+            ? Path.Combine(_recordingPath, SanitizeFilename(entry.Name))
+            : Path.Combine(_recordingPath, SanitizeFilename(entry.Group), SanitizeFilename(entry.Name));
+        Directory.CreateDirectory(streamerDirectory);
+
+        var title = SanitizeFilename(video.Title);
+        if (title.Length > 80) title = title[..80];
+        var fileName = $"{entry.Name} - {video.CreatedAt.ToLocalTime():yyyy-MM-dd_HH-mm} - {title} [{video.Id}].ts";
+        return Path.Combine(streamerDirectory, SanitizeFilename(fileName));
+    }
+
+    private void StartPassiveRecording(PassiveRecordEntry entry, TwitchVideo video, string outputPath)
+    {
+        try
+        {
+            var partialPath = outputPath + ".partial";
+            var psi = new ProcessStartInfo
+            {
+                FileName = "streamlink",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            StreamlinkArguments.AddTwitchOAuthHeader(psi, _twitchOAuthToken);
+            psi.ArgumentList.Add("--stream-segment-threads");
+            psi.ArgumentList.Add("1");
+            psi.ArgumentList.Add("--output");
+            psi.ArgumentList.Add(partialPath);
+            psi.ArgumentList.Add(video.Url);
+            psi.ArgumentList.Add("best");
+
+            var process = new Process { StartInfo = psi };
+            if (!process.Start())
+            {
+                _logger.LogError("Failed to start passive recording for {Name} VOD {VideoId}", entry.Name, video.Id);
+                return;
+            }
+
+            try
+            {
+                process.PriorityClass = ProcessPriorityClass.BelowNormal;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not lower process priority for passive VOD {VideoId}", video.Id);
+            }
+
+            _activePassiveRecording = new PassiveRecordingInfo(process, partialPath, outputPath, entry.Name, video.Id);
+            _logger.LogInformation("Started low-priority passive VOD backfill for {Name}: {Title} ({VideoId})",
+                entry.Name, video.Title, video.Id);
+
+            _ = DrainProcessOutputAsync(process, entry.Name, video.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to start passive recording for {Name} VOD {VideoId}", entry.Name, video.Id);
+        }
+    }
+
+    private async Task DrainProcessOutputAsync(Process process, string name, string videoId)
+    {
+        try
+        {
+            var stderrTask = Task.Run(async () =>
+            {
+                string? line;
+                while ((line = await process.StandardError.ReadLineAsync()) != null)
+                    if (!string.IsNullOrWhiteSpace(line))
+                        _logger.LogDebug("[Passive {Name}/{VideoId}] {Line}", name, videoId, line.Trim());
+            });
+            var stdoutTask = Task.Run(async () =>
+            {
+                while (await process.StandardOutput.ReadLineAsync() != null) { }
+            });
+            await Task.WhenAll(stderrTask, stdoutTask);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error reading streamlink output for passive VOD {VideoId}", videoId);
+        }
+    }
+
+    private void CompletePassiveRecordingIfExited()
+    {
+        var active = _activePassiveRecording;
+        if (active == null || !active.Process.HasExited)
+            return;
+
+        _activePassiveRecording = null;
+        try
+        {
+            if (active.Process.ExitCode == 0 && File.Exists(active.PartialPath))
+            {
+                File.Move(active.PartialPath, active.OutputPath, overwrite: true);
+                _logger.LogInformation("Completed passive VOD backfill for {Name}/{VideoId}: {Path}",
+                    active.Name, active.VideoId, active.OutputPath);
+            }
+            else
+            {
+                _logger.LogWarning("Passive VOD backfill for {Name}/{VideoId} failed with exit code {ExitCode}",
+                    active.Name, active.VideoId, active.Process.ExitCode);
+                if (File.Exists(active.PartialPath))
+                    File.Delete(active.PartialPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to finalize passive VOD backfill for {Name}/{VideoId}", active.Name, active.VideoId);
+        }
+        finally
+        {
+            active.Process.Dispose();
+        }
+    }
+
+    private void StopPassiveRecording(string reason)
+    {
+        var active = _activePassiveRecording;
+        _activePassiveRecording = null;
+        if (active == null)
+            return;
+
+        try
+        {
+            if (!active.Process.HasExited)
+            {
+                _logger.LogInformation("Stopping passive VOD backfill {VideoId}: {Reason}", active.VideoId, reason);
+                active.Process.Kill(true);
+            }
+            active.Process.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error stopping passive VOD backfill {VideoId}", active.VideoId);
+        }
     }
 
     private void StartRecording(ChannelInfo channel)
@@ -476,4 +659,5 @@ public class RecordingService : BackgroundService
     public int ActiveRecordingCount => _activeRecordings.Count;
 
     private record RecordingInfo(Process Process, string OutputPath, DateTime StartedAt, string StreamTitle);
+    private record PassiveRecordingInfo(Process Process, string PartialPath, string OutputPath, string Name, string VideoId);
 }
