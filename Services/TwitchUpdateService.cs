@@ -27,7 +27,7 @@ public class TwitchUpdateService : BackgroundService
         
         if (!int.TryParse(Environment.GetEnvironmentVariable("GUIDE_UPDATE_MINUTES"), out _updateMinutes))
         {
-            _updateMinutes = 2; // Default to 2 minutes
+            _updateMinutes = 5;
         }
         else if (_updateMinutes < 2)
         {

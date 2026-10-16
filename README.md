@@ -199,7 +199,7 @@ Passive VODs are copied with Streamlink without transcoding, one download at a t
 | `TWITCH_OAUTH_TOKEN` | *(empty)* | Optional Twitch website auth token for Streamlink. Useful when the account has Twitch Turbo or a channel subscription that Twitch honors for ad-free playback. Keep this secret. |
 | `RECORDING_PATH` | *(disabled)* | Internal container path to save recordings (e.g. `/recordings`) |
 | `RECORDING_RETENTION_DAYS` | `0` | Global days to keep recordings before deletion; `0` disables deletion |
-| `GUIDE_UPDATE_MINUTES` | `2` | How often to refresh Twitch stream status and trigger Jellyfin guide refresh. Values below 2 are clamped to 2 minutes to avoid hammering Twitch/Jellyfin. |
+| `GUIDE_UPDATE_MINUTES` | `5` | How often to refresh Twitch stream status and trigger Jellyfin guide refresh. Values below 2 are clamped to 2 minutes to avoid hammering Twitch/Jellyfin. |
 
 ### Twitch Ads
 
@@ -225,7 +225,7 @@ Use `./scripts/rebuild.sh` instead of Container Manager UI.
 3. View logs for recording errors
 
 ### Guide shows wrong status
-Guide updates every `GUIDE_UPDATE_MINUTES` (default 2). Jellyfin re-fetches M3U/XMLTV automatically; ensure your Jellyfin Live TV guide refresh is set to match. Playlist/EPG requests also opportunistically refresh Twitch status when the cached state is older than 2 minutes. For Plex: Settings → Live TV → Refresh Guide.
+Guide updates every `GUIDE_UPDATE_MINUTES` (default 5). The tuner authenticates Jellyfin scheduled-task requests using the `Authorization: MediaBrowser` scheme, including Jellyfin 12 versions where legacy `X-Emby-Token` authentication is disabled. Jellyfin re-fetches M3U/XMLTV automatically; ensure your Jellyfin Live TV guide refresh is set to match. Playlist/EPG requests also opportunistically refresh Twitch status when the cached state is older than 2 minutes. For Plex: Settings → Live TV → Refresh Guide.
 
 ---
 

@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -51,7 +52,7 @@ public class JellyfinService
         try
         {
             var client = _httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("X-Emby-Token", _config.JellyfinApiKey);
+            client.DefaultRequestHeaders.Authorization = BuildMediaBrowserAuthorization(_config.JellyfinApiKey);
 
             // 1. Find the task ID if not cached
             if (string.IsNullOrEmpty(_cachedRefreshTaskId))
@@ -125,5 +126,20 @@ public class JellyfinService
             // Reset cached ID so we retry discovery next time
             _cachedRefreshTaskId = null;
         }
+    }
+
+    private static AuthenticationHeaderValue BuildMediaBrowserAuthorization(string apiKey)
+    {
+        static string Quote(string value) =>
+            $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+
+        var parameters = string.Join(", ",
+            $"Client={Quote("TwitchPlexTuner")}",
+            $"Device={Quote("Server")}",
+            $"DeviceId={Quote("twitch-plex-tuner")}",
+            $"Version={Quote("1.0")}",
+            $"Token={Quote(apiKey)}");
+
+        return new AuthenticationHeaderValue("MediaBrowser", parameters);
     }
 }
