@@ -20,4 +20,8 @@
     <None Remove="TwitchPlexTuner.Tests\**" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TwitchPlexTuner.Tests" />
+  </ItemGroup>
+
 </Project>
