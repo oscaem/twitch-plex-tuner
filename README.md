@@ -24,19 +24,31 @@ Create a folder on your NAS (e.g., `/volume1/docker/twitch-plex-tuner`) with:
 **`subscriptions.yaml`**:
 ```yaml
 twitch_recorder:
-  "EdeLive": "https://www.twitch.tv/edelive"
-  "Nils": "https://www.twitch.tv/nils"
+  "SampleStreamerOne": "https://www.twitch.tv/sample_streamer_one"
+  "SampleStreamerTwo": "https://www.twitch.tv/sample_streamer_two"
+  "SampleStreamerThree": "https://www.twitch.tv/sample_streamer_three"
+  "SampleStreamerFour": "https://www.twitch.tv/sample_streamer_four"
 
 # Optional: only these channels will be recorded when RECORDING_PATH is set
 recording:
-  - edelive
-  - nils
+  - sample_streamer_one
+  - sample_streamer_two
+  - sample_streamer_three
+
+# Optional per-channel recording retention (days); 0 keeps recordings forever
+recording_retention_days:
+  sample_streamer_one: 60
+  sample_streamer_two: 0
 
 # Optional: archive-only backfill, never exposed in the tuner playlist
 passive_record:
-  - name: "Example Streamer"
-    url: "https://www.twitch.tv/example"
-    group: "Example Group" # Optional; stores as Example Group/Example Streamer
+  - name: "SampleStreamerFour"
+    url: "https://www.twitch.tv/sample_streamer_four"
+    group: "Gaming" # Optional; stores as Gaming/SampleStreamerFour
+    retention_days: 45 # Optional; overrides global retention for this passive streamer
+  - name: "SampleStreamerFive"
+    url: "https://www.twitch.tv/sample_streamer_five"
+    retention_days: 0 # No group; keeps this streamer's recordings indefinitely
 ```
 
 **`.env`** (create this file):
@@ -144,14 +156,18 @@ Recording uses **streamlink** (separate from the live streaming pipeline) and on
 - Stops recording when stream ends
 - Keeps recordings as `.ts`; no MP4 remux/conversion is performed
 - Files organized by streamer name
-- **Retention**: Old recordings are deleted after `RECORDING_RETENTION_DAYS` (default 30 days)
+- **Retention**: `RECORDING_RETENTION_DAYS` controls global retention; its default is `0` (keep recordings indefinitely)
 
 ### Per-Channel Config
 Add a `recording:` list to your `subscriptions.yaml` with the login names of channels to record:
 ```yaml
 recording:
-  - edelive
-  - nils
+  - sample_streamer_one
+  - sample_streamer_two
+
+# Optional: override global retention for individual regular recording channels
+recording_retention_days:
+  sample_streamer_one: 60 # 0 means never delete this channel's recordings
 ```
 Channels **not** in this list are tracked/viewable but **not** recorded.
 
@@ -168,7 +184,7 @@ passive_record:
     group: "Example Group"
 ```
 
-Passive VODs are copied with Streamlink without transcoding, one download at a time, with one segment thread and below-normal process priority so regular live recordings take precedence. Completed files are saved as `{RECORDING_PATH}/{name}/...`; when `group` is set, they are saved under `{RECORDING_PATH}/{group}/{name}/...`. Twitch API credentials and `RECORDING_PATH` are required.
+Passive VODs are copied with Streamlink without transcoding, one download at a time, with one segment thread and below-normal process priority so regular live recordings take precedence. Completed files are saved as `{RECORDING_PATH}/{name}/...`; when `group` is set, they are saved under `{RECORDING_PATH}/{group}/{name}/...`. Set `retention_days` on an entry to override global retention for that passive streamer; `0` means never delete that streamer's recordings. Twitch API credentials and `RECORDING_PATH` are required.
 
 ---
 
@@ -182,7 +198,7 @@ Passive VODs are copied with Streamlink without transcoding, one download at a t
 | `STREAM_QUALITY` | `1080p60,1080p,720p60,720p,best` | Quality preference |
 | `TWITCH_OAUTH_TOKEN` | *(empty)* | Optional Twitch website auth token for Streamlink. Useful when the account has Twitch Turbo or a channel subscription that Twitch honors for ad-free playback. Keep this secret. |
 | `RECORDING_PATH` | *(disabled)* | Internal container path to save recordings (e.g. `/recordings`) |
-| `RECORDING_RETENTION_DAYS` | `30` | Days to keep recordings before deletion |
+| `RECORDING_RETENTION_DAYS` | `0` | Global days to keep recordings before deletion; `0` disables deletion |
 | `GUIDE_UPDATE_MINUTES` | `2` | How often to refresh Twitch stream status and trigger Jellyfin guide refresh. Values below 2 are clamped to 2 minutes to avoid hammering Twitch/Jellyfin. |
 
 ### Twitch Ads

@@ -13,7 +13,7 @@ services:
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
       - STREAM_QUALITY=720p,720p60,best
       - RECORDING_PATH=/recordings
-      - RECORDING_RETENTION_DAYS=360
+      - RECORDING_RETENTION_DAYS=0
       - GUIDE_UPDATE_MINUTES=2
       - STREAM_ENGINE=yt-dlp
       - JELLYFIN_URL=http://192.168.178.39:8096

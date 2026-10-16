@@ -92,18 +92,23 @@ public class TwitchService
                 Console.WriteLine($"Recording enabled for {recordingLogins.Count} channel(s): {string.Join(", ", recordingLogins)}");
             }
 
+            var recordingRetentionDays = ParseRecordingRetentionDays(root);
             var newChannels = new List<ChannelInfo>();
             foreach (var kvp in channelDict ?? new Dictionary<string, string>())
             {
                 var login = kvp.Value.Split('/').Last().ToLower();
                 if (string.IsNullOrEmpty(login)) continue;
+                int? channelRetentionDays = recordingRetentionDays.TryGetValue(login, out var retentionDays)
+                    ? retentionDays
+                    : null;
 
                 newChannels.Add(new ChannelInfo
                 {
                     Login = login,
                     DisplayName = kvp.Key,
                     ProfileImageUrl = $"https://static-cdn.jtvnw.net/jtv_user_pictures/{login}-profile_image-300x300.png",
-                    RecordEnabled = recordingLogins.Contains(login)
+                    RecordEnabled = recordingLogins.Contains(login),
+                    RetentionDays = channelRetentionDays
                 });
             }
 
@@ -279,11 +284,42 @@ public class TwitchService
                 Name = name,
                 Url = url,
                 Login = login,
-                Group = string.IsNullOrWhiteSpace(group) ? null : group
+                Group = string.IsNullOrWhiteSpace(group) ? null : group,
+                RetentionDays = ParseRetentionDays(GetField("retention_days"), $"passive_record entry '{name}'")
             });
         }
 
         return entries;
+    }
+
+    private static Dictionary<string, int> ParseRecordingRetentionDays(Dictionary<string, object> root)
+    {
+        var retentionDays = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (!root.TryGetValue("recording_retention_days", out var section) ||
+            section is not Dictionary<object, object> rawOverrides)
+            return retentionDays;
+
+        foreach (var item in rawOverrides)
+        {
+            var login = item.Key.ToString()?.Trim().ToLowerInvariant();
+            var days = ParseRetentionDays(item.Value?.ToString(), $"recording_retention_days.{login}");
+            if (!string.IsNullOrWhiteSpace(login) && days.HasValue)
+                retentionDays[login] = days.Value;
+        }
+
+        return retentionDays;
+    }
+
+    private static int? ParseRetentionDays(string? value, string settingName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        if (int.TryParse(value, out var days) && days >= 0)
+            return days;
+
+        Console.WriteLine($"Ignoring invalid {settingName}: expected a non-negative whole number of days.");
+        return null;
     }
 
     private async Task<string?> GetAccessTokenAsync()

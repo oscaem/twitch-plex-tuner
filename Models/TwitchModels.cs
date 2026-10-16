@@ -95,6 +95,7 @@ public class PassiveRecordEntry
     public string Url { get; set; } = string.Empty;
     public string? Group { get; set; }
     public string Login { get; set; } = string.Empty;
+    public int? RetentionDays { get; set; }
 }
 
 public class TwitchTokenResponse
@@ -119,4 +120,5 @@ public class ChannelInfo
     public DateTime? StartedAt { get; set; }
     public string? StreamId { get; set; }  // Used for cache invalidation
     public bool RecordEnabled { get; set; } // Whether this channel should be recorded
+    public int? RetentionDays { get; set; }
 }

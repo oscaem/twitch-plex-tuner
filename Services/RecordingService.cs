@@ -64,9 +64,15 @@ public class RecordingService : BackgroundService
             _recordingPath = string.Empty;
         }
         
-        if (!int.TryParse(Environment.GetEnvironmentVariable("RECORDING_RETENTION_DAYS"), out _retentionDays))
+        var retentionDaysSetting = Environment.GetEnvironmentVariable("RECORDING_RETENTION_DAYS");
+        if (string.IsNullOrWhiteSpace(retentionDaysSetting))
         {
-            _retentionDays = 30;
+            _retentionDays = 0;
+        }
+        else if (!int.TryParse(retentionDaysSetting, out _retentionDays) || _retentionDays < 0)
+        {
+            _logger.LogWarning("Invalid RECORDING_RETENTION_DAYS value '{Value}'. Retention cleanup is disabled.", retentionDaysSetting);
+            _retentionDays = 0;
         }
     }
 
@@ -577,18 +583,27 @@ public class RecordingService : BackgroundService
         {
             if (!Directory.Exists(_recordingPath)) return;
 
-            var cutoff = DateTime.Now.AddDays(-_retentionDays);
+            var channels = _twitchService.GetChannels();
+            var passiveEntries = _twitchService.GetPassiveRecordEntries();
             var files = Directory.GetFiles(_recordingPath, "*.*", SearchOption.AllDirectories);
             var deletedCount = 0;
             var totalFreedMB = 0.0;
 
-            _logger.LogInformation("🧹 Running recording cleanup (retention: {Days} days, cutoff: {Cutoff:yyyy-MM-dd HH:mm})",
-                _retentionDays, cutoff);
+            if (_retentionDays == 0 &&
+                !channels.Any(channel => channel.RetentionDays > 0) &&
+                !passiveEntries.Any(entry => entry.RetentionDays > 0))
+            {
+                _logger.LogDebug("Recording cleanup disabled: global and per-streamer retention are all zero or unset.");
+                return;
+            }
+
+            _logger.LogInformation("🧹 Running recording cleanup (global retention: {Days} days)", _retentionDays);
 
             foreach (var file in files)
             {
                 var fi = new FileInfo(file);
-                if (fi.CreationTime < cutoff)
+                var retentionDays = GetRetentionDaysForFile(file, channels, passiveEntries);
+                if (retentionDays > 0 && fi.CreationTime < DateTime.Now.AddDays(-retentionDays))
                 {
                     try
                     {
@@ -633,6 +648,41 @@ public class RecordingService : BackgroundService
         {
             _logger.LogError(ex, "❌ Error during recording cleanup");
         }
+    }
+
+    private int GetRetentionDaysForFile(
+        string filePath,
+        IReadOnlyCollection<ChannelInfo> channels,
+        IReadOnlyCollection<PassiveRecordEntry> passiveEntries)
+    {
+        var relativePath = Path.GetRelativePath(_recordingPath, filePath);
+        var pathParts = relativePath.Split(
+            new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+            StringSplitOptions.RemoveEmptyEntries);
+
+        if (pathParts.Length >= 3 &&
+            pathParts[1].Equals("Season Recordings", StringComparison.OrdinalIgnoreCase))
+        {
+            var channel = channels.FirstOrDefault(item =>
+                SanitizeFilename(item.DisplayName).Equals(pathParts[0], StringComparison.OrdinalIgnoreCase));
+            if (channel != null)
+                return channel.RetentionDays ?? _retentionDays;
+        }
+
+        foreach (var entry in passiveEntries)
+        {
+            var isGroupedPath = !string.IsNullOrWhiteSpace(entry.Group) &&
+                pathParts.Length >= 3 &&
+                SanitizeFilename(entry.Group).Equals(pathParts[0], StringComparison.OrdinalIgnoreCase) &&
+                SanitizeFilename(entry.Name).Equals(pathParts[1], StringComparison.OrdinalIgnoreCase);
+            var isUngroupedPath = string.IsNullOrWhiteSpace(entry.Group) &&
+                pathParts.Length >= 2 &&
+                SanitizeFilename(entry.Name).Equals(pathParts[0], StringComparison.OrdinalIgnoreCase);
+            if (isGroupedPath || isUngroupedPath)
+                return entry.RetentionDays ?? _retentionDays;
+        }
+
+        return _retentionDays;
     }
 
     private static double GetFileSizeMB(string path)
