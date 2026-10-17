@@ -322,6 +322,7 @@ public class RecordingService : BackgroundService
         try
         {
             var partialPath = outputPath + ".partial";
+            var quality = Environment.GetEnvironmentVariable("STREAM_QUALITY") ?? "best";
             var psi = new ProcessStartInfo
             {
                 FileName = "streamlink",
@@ -336,7 +337,7 @@ public class RecordingService : BackgroundService
             psi.ArgumentList.Add("--output");
             psi.ArgumentList.Add(partialPath);
             psi.ArgumentList.Add(video.Url);
-            psi.ArgumentList.Add("best");
+            psi.ArgumentList.Add(quality);
 
             var process = new Process { StartInfo = psi };
             if (!process.Start())
@@ -355,8 +356,8 @@ public class RecordingService : BackgroundService
             }
 
             _activePassiveRecording = new PassiveRecordingInfo(process, partialPath, outputPath, archivePath, entry.Name, video.Id);
-            _logger.LogInformation("Started low-priority passive VOD archive download for {Name}: {Title} ({VideoId})",
-                entry.Name, video.Title, video.Id);
+            _logger.LogInformation("Started low-priority passive VOD archive download for {Name}: {Title} ({VideoId}) with quality preference {Quality}",
+                entry.Name, video.Title, video.Id, quality);
 
             _ = DrainProcessOutputAsync(process, entry.Name, video.Id);
         }
