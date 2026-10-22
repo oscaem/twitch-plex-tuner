@@ -18,11 +18,15 @@ namespace TwitchPlexTuner.Services;
 /// </summary>
 public class RecordingService : BackgroundService
 {
+    private const int DefaultPassiveDownloadSegmentThreads = 8;
+    private const int MaxPassiveDownloadSegmentThreads = 32;
+
     private readonly TwitchService _twitchService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<RecordingService> _logger;
     private readonly string _recordingPath;
     private readonly int _retentionDays;
+    private readonly int _passiveDownloadSegmentThreads;
     private readonly string _twitchOAuthToken;
     
     // Signal from TwitchUpdateService that fresh channel data is available
@@ -40,6 +44,7 @@ public class RecordingService : BackgroundService
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _twitchOAuthToken = config.Value.TwitchOAuthToken;
+        _passiveDownloadSegmentThreads = GetPassiveDownloadSegmentThreads();
         
         var envPath = Environment.GetEnvironmentVariable("RECORDING_PATH");
         var defaultContainerPath = "/recordings";
@@ -352,7 +357,7 @@ public class RecordingService : BackgroundService
             };
             StreamlinkArguments.AddTwitchOAuthHeader(psi, _twitchOAuthToken);
             psi.ArgumentList.Add("--stream-segment-threads");
-            psi.ArgumentList.Add("2");
+            psi.ArgumentList.Add(_passiveDownloadSegmentThreads.ToString());
             psi.ArgumentList.Add("--output");
             psi.ArgumentList.Add(partialPath);
             psi.ArgumentList.Add(video.Url);
@@ -365,18 +370,9 @@ public class RecordingService : BackgroundService
                 return false;
             }
 
-            try
-            {
-                process.PriorityClass = ProcessPriorityClass.BelowNormal;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not lower process priority for passive VOD {VideoId}", video.Id);
-            }
-
             _activePassiveRecording = new PassiveRecordingInfo(process, partialPath, outputPath, archivePath, entry.Name, entry.Login, video.Id);
-            _logger.LogDebug("Started passive VOD download for {Name}: {Title} ({VideoId}); output: {Path}; quality: {Quality}",
-                entry.Name, video.Title, video.Id, outputPath, quality);
+            _logger.LogDebug("Started passive VOD download for {Name}: {Title} ({VideoId}); output: {Path}; quality: {Quality}; segment threads: {Threads}",
+                entry.Name, video.Title, video.Id, outputPath, quality, _passiveDownloadSegmentThreads);
 
             _ = DrainProcessOutputAsync(process, entry.Name, video.Id);
             return true;
@@ -769,6 +765,21 @@ public class RecordingService : BackgroundService
     {
         var invalid = Path.GetInvalidFileNameChars();
         return string.Join("", filename.Select(c => invalid.Contains(c) ? '_' : c));
+    }
+
+    private int GetPassiveDownloadSegmentThreads()
+    {
+        var setting = Environment.GetEnvironmentVariable("PASSIVE_DOWNLOAD_SEGMENT_THREADS");
+        if (string.IsNullOrWhiteSpace(setting))
+            return DefaultPassiveDownloadSegmentThreads;
+
+        if (int.TryParse(setting, out var threads) && threads is >= 1 and <= MaxPassiveDownloadSegmentThreads)
+            return threads;
+
+        _logger.LogWarning(
+            "Invalid PASSIVE_DOWNLOAD_SEGMENT_THREADS value '{Value}'. Using default of {Default} (allowed range: 1-{Maximum}).",
+            setting, DefaultPassiveDownloadSegmentThreads, MaxPassiveDownloadSegmentThreads);
+        return DefaultPassiveDownloadSegmentThreads;
     }
 
     /// <summary>Check if a channel is currently being recorded.</summary>

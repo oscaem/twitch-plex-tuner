@@ -184,7 +184,7 @@ passive_record:
     group: "Example Group"
 ```
 
-Passive recording only downloads Twitch archive VODs; it never captures the live channel. It uses the same `STREAM_QUALITY` preference as active recordings. It waits until no main-channel live recording is running, then downloads one VOD at a time with two segment threads and below-normal process priority. Passive entries are checked in rotating order, and failed VODs are temporarily skipped for five minutes so they do not prevent other subscriptions from being backfilled. Completed files are saved directly under `{RECORDING_PATH}/{name}/...`; when `group` is set, they are saved under `{RECORDING_PATH}/{group}/{name}/...`. A `.twitch-vod-archive.txt` file in each streamer's directory stores completed Twitch VOD IDs. IDs remain archived even if you delete a recording, so that VOD is not downloaded again. Interrupted downloads are not archived and can be retried after restart. Set `retention_days` on an entry to override global retention for that passive streamer; `0` means never delete that streamer's recordings. Twitch API credentials and `RECORDING_PATH` are required.
+Passive recording only downloads Twitch archive VODs; it never captures the live channel. It uses the same `STREAM_QUALITY` preference as active recordings. It waits until no main-channel live recording is running, then downloads one VOD at a time using eight concurrent segment-download threads by default. Tune this with `PASSIVE_DOWNLOAD_SEGMENT_THREADS` (allowed range: 1-32); more threads can help when segment requests are latency-limited, but cannot exceed the available network bandwidth or Twitch's delivery rate. Passive entries are checked in rotating order, and failed VODs are temporarily skipped for five minutes so they do not prevent other subscriptions from being backfilled. Completed files are saved directly under `{RECORDING_PATH}/{name}/...`; when `group` is set, they are saved under `{RECORDING_PATH}/{group}/{name}/...`. A `.twitch-vod-archive.txt` file in each streamer's directory stores completed Twitch VOD IDs. IDs remain archived even if you delete a recording, so that VOD is not downloaded again. Interrupted downloads are not archived and can be retried after restart. Set `retention_days` on an entry to override global retention for that passive streamer; `0` means never delete that streamer's recordings. Twitch API credentials and `RECORDING_PATH` are required.
 
 ---
 
@@ -196,6 +196,7 @@ Passive recording only downloads Twitch archive VODs; it never captures the live
 | `CLIENT_SECRET` | required | Twitch API Client Secret |
 | `BASE_URL` | `http://localhost:5000` | Public URL for M3U/XMLTV |
 | `STREAM_QUALITY` | `1080p60,1080p,720p60,720p,best` | Quality preference |
+| `PASSIVE_DOWNLOAD_SEGMENT_THREADS` | `8` | Concurrent Streamlink segment downloads for passive VODs (1-32) |
 | `TWITCH_OAUTH_TOKEN` | *(empty)* | Optional Twitch website auth token for Streamlink. Useful when the account has Twitch Turbo or a channel subscription that Twitch honors for ad-free playback. Keep this secret. |
 | `RECORDING_PATH` | *(disabled)* | Internal container path to save recordings (e.g. `/recordings`) |
 | `RECORDING_RETENTION_DAYS` | `0` | Global days to keep recordings before deletion; `0` disables deletion |

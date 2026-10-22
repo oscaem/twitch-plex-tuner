@@ -12,6 +12,7 @@ services:
       - BASE_URL=http://192.168.178.39:5200
       - SUBSCRIPTIONS_PATH=/config/subscriptions.yaml
       - STREAM_QUALITY=720p,720p60,best
+      - PASSIVE_DOWNLOAD_SEGMENT_THREADS=8
       - RECORDING_PATH=/recordings
       - RECORDING_RETENTION_DAYS=0
       - GUIDE_UPDATE_MINUTES=5
