@@ -375,7 +375,7 @@ public class RecordingService : BackgroundService
             }
 
             _activePassiveRecording = new PassiveRecordingInfo(process, partialPath, outputPath, archivePath, entry.Name, entry.Login, video.Id);
-            _logger.LogInformation("Started passive VOD download for {Name}: {Title} ({VideoId}); output: {Path}; quality: {Quality}",
+            _logger.LogDebug("Started passive VOD download for {Name}: {Title} ({VideoId}); output: {Path}; quality: {Quality}",
                 entry.Name, video.Title, video.Id, outputPath, quality);
 
             _ = DrainProcessOutputAsync(process, entry.Name, video.Id);
@@ -666,7 +666,7 @@ public class RecordingService : BackgroundService
                 return;
             }
 
-            _logger.LogInformation("🧹 Running recording cleanup (global retention: {Days} days)", _retentionDays);
+            _logger.LogDebug("Running recording cleanup (global retention: {Days} days)", _retentionDays);
 
             foreach (var file in files)
             {
