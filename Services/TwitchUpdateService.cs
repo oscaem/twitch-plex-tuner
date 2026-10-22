@@ -45,9 +45,9 @@ public class TwitchUpdateService : BackgroundService
         {
             try
             {
-                _logger.LogInformation("Updating Twitch channels...");
+                _logger.LogDebug("Updating Twitch channels...");
                 await _twitchService.UpdateChannelsAsync();
-                _logger.LogInformation("Update complete. Triggering Jellyfin guide refresh...");
+                _logger.LogDebug("Twitch channel update complete; refreshing Jellyfin guide.");
                 
                 // Trigger Jellyfin guide refresh
                 await _jellyfinService.RefreshGuideAsync(stoppingToken);

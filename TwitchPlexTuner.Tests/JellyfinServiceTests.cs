@@ -41,6 +41,27 @@ public class JellyfinServiceTests
         }
     }
 
+    [Fact]
+    public async Task RefreshGuideAsync_RetriesTransientTransportFailure()
+    {
+        var handler = new RecordingHttpMessageHandler { FailFirstRequest = true };
+        var service = new JellyfinService(
+            new TestHttpClientFactory(handler),
+            Options.Create(new TwitchConfig
+            {
+                JellyfinUrl = "http://jellyfin.test",
+                JellyfinApiKey = "test-api-key"
+            }),
+            NullLogger<JellyfinService>.Instance);
+
+        await service.RefreshGuideAsync();
+
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+        Assert.Equal(HttpMethod.Get, handler.Requests[1].Method);
+        Assert.Equal(HttpMethod.Post, handler.Requests[2].Method);
+    }
+
     private sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
@@ -49,6 +70,7 @@ public class JellyfinServiceTests
     private sealed class RecordingHttpMessageHandler : HttpMessageHandler
     {
         public List<CapturedRequest> Requests { get; } = new();
+        public bool FailFirstRequest { get; init; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -57,6 +79,9 @@ public class JellyfinServiceTests
                 request.RequestUri,
                 request.Headers.Authorization,
                 request.Headers.Contains("X-Emby-Token")));
+
+            if (FailFirstRequest && Requests.Count == 1)
+                throw new IOException("Simulated premature response end.");
 
             var response = request.Method == HttpMethod.Get
                 ? new HttpResponseMessage(HttpStatusCode.OK)

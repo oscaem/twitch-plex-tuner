@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -31,7 +33,7 @@ public class JellyfinService
 
         if (!string.IsNullOrEmpty(_config.JellyfinUrl) && !string.IsNullOrEmpty(_config.JellyfinApiKey))
         {
-            _logger.LogInformation("Jellyfin guide refresh enabled for {Url}", _config.JellyfinUrl);
+            _logger.LogDebug("Jellyfin guide refresh enabled for {Url}", _config.JellyfinUrl);
         }
         else
         {
@@ -58,73 +60,96 @@ public class JellyfinService
             if (string.IsNullOrEmpty(_cachedRefreshTaskId))
             {
                 var tasksUrl = $"{_config.JellyfinUrl.TrimEnd('/')}/ScheduledTasks";
-                _logger.LogInformation("Fetching Jellyfin scheduled tasks from {Url}", tasksUrl);
-                var response = await client.GetAsync(tasksUrl, ct);
+                using var response = await SendWithRetryAsync(() => client.GetAsync(tasksUrl, ct), ct);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError("Failed to fetch Jellyfin scheduled tasks. Status: {Status}", response.StatusCode);
+                    _logger.LogWarning("Failed to fetch Jellyfin guide task. Status: {Status}", response.StatusCode);
                     return;
                 }
 
                 var content = await response.Content.ReadAsStringAsync(ct);
                 using var doc = JsonDocument.Parse(content);
-                
-                // Log all available tasks for debugging
-                var taskNames = doc.RootElement.EnumerateArray()
-                    .Select(t => $"{t.GetProperty("Key").GetString()} ({t.GetProperty("Name").GetString()})")
-                    .ToList();
-                _logger.LogInformation("Available Jellyfin tasks: {Tasks}", string.Join(", ", taskNames));
 
-                // Search broadly for the guide refresh task
                 var refreshTask = doc.RootElement.EnumerateArray()
-                    .FirstOrDefault(t =>
-                    {
-                        var key = t.GetProperty("Key").GetString() ?? "";
-                        var name = t.GetProperty("Name").GetString() ?? "";
-                        return key.Contains("RefreshGuide", StringComparison.OrdinalIgnoreCase) ||
-                               key.Contains("LiveTv", StringComparison.OrdinalIgnoreCase) ||
-                               name.Contains("Guide", StringComparison.OrdinalIgnoreCase) ||
-                               name.Contains("Live TV", StringComparison.OrdinalIgnoreCase);
-                    });
+                    .FirstOrDefault(t => GetStringProperty(t, "Key")
+                        .Equals("RefreshGuide", StringComparison.OrdinalIgnoreCase));
+
+                if (refreshTask.ValueKind == JsonValueKind.Undefined)
+                    refreshTask = doc.RootElement.EnumerateArray()
+                        .FirstOrDefault(t => GetStringProperty(t, "Name")
+                            .Equals("Refresh Guide", StringComparison.OrdinalIgnoreCase));
 
                 if (refreshTask.ValueKind != JsonValueKind.Undefined)
                 {
-                    _cachedRefreshTaskId = refreshTask.GetProperty("Id").GetString();
-                    var taskName = refreshTask.GetProperty("Name").GetString();
-                    _logger.LogInformation("Found Jellyfin guide refresh task: '{Name}' (ID: {Id})", taskName, _cachedRefreshTaskId);
+                    _cachedRefreshTaskId = GetStringProperty(refreshTask, "Id");
+                    if (string.IsNullOrWhiteSpace(_cachedRefreshTaskId))
+                    {
+                        _logger.LogError("Jellyfin Refresh Guide task did not include an ID.");
+                        return;
+                    }
                 }
                 else
                 {
-                    _logger.LogError("Could not find any guide/Live TV refresh task in Jellyfin. Available tasks: {Tasks}",
-                        string.Join(", ", taskNames));
+                    _logger.LogError("Could not find the Jellyfin Refresh Guide task.");
                     return;
                 }
             }
 
-            // 2. Trigger the task
             var runUrl = $"{_config.JellyfinUrl.TrimEnd('/')}/ScheduledTasks/Running/{_cachedRefreshTaskId}";
-            _logger.LogInformation("Triggering Jellyfin task at {Url}", runUrl);
-            var runResponse = await client.PostAsync(runUrl, null, ct);
+            using var runResponse = await SendWithRetryAsync(() => client.PostAsync(runUrl, null, ct), ct);
             
             if (runResponse.IsSuccessStatusCode || runResponse.StatusCode == System.Net.HttpStatusCode.NoContent)
             {
-                _logger.LogInformation("Jellyfin guide refresh triggered successfully (Status: {Status}).", runResponse.StatusCode);
+                _logger.LogDebug("Jellyfin guide refresh triggered successfully (Status: {Status}).", runResponse.StatusCode);
             }
             else
             {
                 var body = await runResponse.Content.ReadAsStringAsync(ct);
-                _logger.LogError("Failed to trigger Jellyfin guide refresh. Status: {Status}, Body: {Body}", 
+                _logger.LogWarning("Failed to trigger Jellyfin guide refresh. Status: {Status}, Body: {Body}",
                     runResponse.StatusCode, body);
-                // Reset cached ID in case it's stale
                 _cachedRefreshTaskId = null;
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error refreshing Jellyfin guide");
-            // Reset cached ID so we retry discovery next time
             _cachedRefreshTaskId = null;
+        }
+    }
+
+    private static string GetStringProperty(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var property) ? property.GetString() ?? string.Empty : string.Empty;
+
+    private static async Task<HttpResponseMessage> SendWithRetryAsync(
+        Func<Task<HttpResponseMessage>> send,
+        CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            HttpResponseMessage response;
+            try
+            {
+                response = await send();
+            }
+            catch (Exception ex) when (attempt < 2 && (ex is HttpRequestException || ex is IOException))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * (attempt + 1)), ct);
+                continue;
+            }
+
+            var shouldRetry = attempt < 2 &&
+                (response.StatusCode == HttpStatusCode.TooManyRequests ||
+                 (int)response.StatusCode >= 500);
+            if (!shouldRetry)
+                return response;
+
+            response.Dispose();
+            await Task.Delay(TimeSpan.FromMilliseconds(250 * (attempt + 1)), ct);
         }
     }
 

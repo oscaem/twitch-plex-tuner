@@ -30,7 +30,9 @@ public class RecordingService : BackgroundService
     
     // Track active recordings to avoid duplicates
     private readonly ConcurrentDictionary<string, RecordingInfo> _activeRecordings = new();
+    private readonly Dictionary<string, DateTime> _passiveRetryAfter = new(StringComparer.Ordinal);
     private PassiveRecordingInfo? _activePassiveRecording;
+    private int _nextPassiveEntryIndex;
     
     public RecordingService(TwitchService twitchService, ILogger<RecordingService> logger, IHttpClientFactory httpClientFactory, IOptions<TwitchConfig> config)
     {
@@ -83,6 +85,11 @@ public class RecordingService : BackgroundService
     public void NotifyChannelsUpdated()
     {
         _logger.LogDebug("Recording service received channel update notification");
+        if (_activePassiveRecording is { } active && !active.Process.HasExited)
+        {
+            _logger.LogInformation("Passive VOD download is still in progress for {Name}/{VideoId}.",
+                active.Name, active.VideoId);
+        }
         _updateSignal.Set();
     }
 
@@ -118,7 +125,7 @@ public class RecordingService : BackgroundService
                 _updateSignal.Wait(TimeSpan.FromMinutes(5), stoppingToken);
                 _updateSignal.Reset();
 
-                _logger.LogInformation("🔄 Recording sync triggered — checking live channels...");
+                _logger.LogDebug("Recording sync triggered — checking live channels.");
 
                 // Run cleanup once per hour
                 if (DateTime.UtcNow - lastCleanup > TimeSpan.FromHours(1))
@@ -158,7 +165,7 @@ public class RecordingService : BackgroundService
         var recordableChannels = channels.Where(c => c.IsLive && c.RecordEnabled).ToList();
         var allRecordEnabledChannels = channels.Where(c => c.RecordEnabled).ToList();
 
-        _logger.LogInformation("📊 Channel status: {Total} total, {RecordEnabled} record-enabled, {Live} live & recordable, {ActiveRecordings} currently recording",
+        _logger.LogDebug("Channel status: {Total} total, {RecordEnabled} record-enabled, {Live} live & recordable, {ActiveRecordings} currently recording",
             channels.Count,
             allRecordEnabledChannels.Count,
             recordableChannels.Count,
@@ -245,8 +252,11 @@ public class RecordingService : BackgroundService
         if (entries.Count == 0)
             return;
 
-        foreach (var entry in entries)
+        var startIndex = _nextPassiveEntryIndex % entries.Count;
+        _nextPassiveEntryIndex = (startIndex + 1) % entries.Count;
+        for (var offset = 0; offset < entries.Count; offset++)
         {
+            var entry = entries[(startIndex + offset) % entries.Count];
             ct.ThrowIfCancellationRequested();
             List<TwitchVideo> videos;
             try
@@ -259,8 +269,16 @@ public class RecordingService : BackgroundService
                 continue;
             }
 
-            foreach (var video in videos.OrderBy(video => video.CreatedAt))
+            foreach (var video in videos.OrderByDescending(video => video.CreatedAt))
             {
+                var retryKey = $"{entry.Login}/{video.Id}";
+                if (_passiveRetryAfter.TryGetValue(retryKey, out var retryAt))
+                {
+                    if (retryAt > DateTime.UtcNow)
+                        continue;
+                    _passiveRetryAfter.Remove(retryKey);
+                }
+
                 var outputPath = GetPassiveRecordingPath(entry, video);
                 var archivePath = PassiveVodArchive.GetPath(Path.GetDirectoryName(outputPath)!);
                 HashSet<string> archivedIds;
@@ -294,12 +312,13 @@ public class RecordingService : BackgroundService
                 }
                 if (File.Exists(outputPath + ".partial"))
                 {
-                    _logger.LogWarning("Removing incomplete passive VOD download before retry: {Path}", outputPath + ".partial");
+                    _logger.LogDebug("Removing incomplete passive VOD download before retry: {Path}", outputPath + ".partial");
                     File.Delete(outputPath + ".partial");
                 }
 
-                StartPassiveRecording(entry, video, outputPath, archivePath);
-                return;
+                if (StartPassiveRecording(entry, video, outputPath, archivePath))
+                    return;
+                _passiveRetryAfter[retryKey] = DateTime.UtcNow.AddMinutes(5);
             }
         }
     }
@@ -317,7 +336,7 @@ public class RecordingService : BackgroundService
         return Path.Combine(streamerDirectory, SanitizeFilename(fileName));
     }
 
-    private void StartPassiveRecording(PassiveRecordEntry entry, TwitchVideo video, string outputPath, string archivePath)
+    private bool StartPassiveRecording(PassiveRecordEntry entry, TwitchVideo video, string outputPath, string archivePath)
     {
         try
         {
@@ -333,7 +352,7 @@ public class RecordingService : BackgroundService
             };
             StreamlinkArguments.AddTwitchOAuthHeader(psi, _twitchOAuthToken);
             psi.ArgumentList.Add("--stream-segment-threads");
-            psi.ArgumentList.Add("1");
+            psi.ArgumentList.Add("2");
             psi.ArgumentList.Add("--output");
             psi.ArgumentList.Add(partialPath);
             psi.ArgumentList.Add(video.Url);
@@ -343,7 +362,7 @@ public class RecordingService : BackgroundService
             if (!process.Start())
             {
                 _logger.LogError("Failed to start passive recording for {Name} VOD {VideoId}", entry.Name, video.Id);
-                return;
+                return false;
             }
 
             try
@@ -355,15 +374,17 @@ public class RecordingService : BackgroundService
                 _logger.LogWarning(ex, "Could not lower process priority for passive VOD {VideoId}", video.Id);
             }
 
-            _activePassiveRecording = new PassiveRecordingInfo(process, partialPath, outputPath, archivePath, entry.Name, video.Id);
-            _logger.LogInformation("Started low-priority passive VOD archive download for {Name}: {Title} ({VideoId}) with quality preference {Quality}",
-                entry.Name, video.Title, video.Id, quality);
+            _activePassiveRecording = new PassiveRecordingInfo(process, partialPath, outputPath, archivePath, entry.Name, entry.Login, video.Id);
+            _logger.LogInformation("Started passive VOD download for {Name}: {Title} ({VideoId}); output: {Path}; quality: {Quality}",
+                entry.Name, video.Title, video.Id, outputPath, quality);
 
             _ = DrainProcessOutputAsync(process, entry.Name, video.Id);
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to start passive recording for {Name} VOD {VideoId}", entry.Name, video.Id);
+            return false;
         }
     }
 
@@ -410,6 +431,7 @@ public class RecordingService : BackgroundService
             {
                 _logger.LogWarning("Passive VOD backfill for {Name}/{VideoId} failed with exit code {ExitCode}",
                     active.Name, active.VideoId, active.Process.ExitCode);
+                _passiveRetryAfter[$"{active.Login}/{active.VideoId}"] = DateTime.UtcNow.AddMinutes(5);
                 if (File.Exists(active.PartialPath))
                     File.Delete(active.PartialPath);
             }
@@ -762,5 +784,6 @@ public class RecordingService : BackgroundService
         string OutputPath,
         string ArchivePath,
         string Name,
+        string Login,
         string VideoId);
 }
